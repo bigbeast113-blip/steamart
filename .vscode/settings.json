@@ -1,0 +1,28 @@
+{
+  // Shell scripts and Python must stay LF or they break on the Steam Deck.
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  },
+  "search.exclude": {
+    "**/__pycache__": true
+  },
+
+  "python.analysis.extraPaths": ["${workspaceFolder}"],
+  "python.testing.unittestEnabled": true,
+  "python.testing.pytestEnabled": false,
+  "python.testing.unittestArgs": ["-v", "-s", "tests", "-p", "test_*.py"],
+
+  "[python]": {
+    "editor.rulers": [88],
+    "editor.tabSize": 4
+  },
+  "[javascript]": { "editor.tabSize": 2 },
+  "[html]": { "editor.tabSize": 2 },
+  "[css]": { "editor.tabSize": 2 },
+  "[shellscript]": { "files.eol": "\n" }
+}

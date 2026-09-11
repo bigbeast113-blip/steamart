@@ -11,4 +11,8 @@ venv/
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
+
+# The shared VS Code launch/task config is committed on purpose; only the
+# per-machine bits are ignored.
+.vscode/*.local.json
+.vscode/settings.local.json

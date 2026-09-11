@@ -151,6 +151,19 @@ To poke at the UI without touching your real library:
 python3 tests/_uicheck.py        # demo server on :8524 with six fake games
 ```
 
+## Working on it in VS Code
+
+The workspace is pre-configured, so opening the folder is all the setup there is.
+
+- **F5** → *SteamArt: web UI*. Other launch targets cover `info`, `list`, a
+  verbose no-browser run, and the demo server that runs against a throwaway
+  Steam tree instead of your real one.
+- **Ctrl+Shift+P → Tasks: Run Test Task** runs all 32 tests. They also show up
+  in the Testing panel.
+- `files.eol` is pinned to LF in the workspace settings and enforced by
+  `.gitattributes`, because a `run.sh` saved with CRLF fails on the Deck with
+  `bad interpreter: /usr/bin/env bash^M`.
+
 ## Requirements
 
 Python 3.7 or newer. That's it — SteamOS already has it.

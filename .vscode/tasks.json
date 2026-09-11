@@ -1,0 +1,54 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run all tests",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start SteamArt",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["steamart.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start demo UI (fake Steam, safe)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["tests/_uicheck.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Show detected Steam install",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["steamart.py", "info"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Compile check (all Python)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["-m", "compileall", "-q", "steamart", "tests", "steamart.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "silent", "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}
