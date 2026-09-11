@@ -1,0 +1,9 @@
+# Shell scripts must stay LF or they will not run on the Steam Deck.
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.bat text eol=crlf

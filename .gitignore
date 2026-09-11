@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Steam files, in case anyone copies one in for debugging
+*.vdf
+*.vdf.*.bak
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

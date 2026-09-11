@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SteamArt</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark"></span>
+    <div>
+      <h1>SteamArt</h1>
+      <p id="steamPath" class="brand-sub">looking for Steam&hellip;</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <label class="field inline">
+      <span>Profile</span>
+      <select id="userSelect"></select>
+    </label>
+    <button id="refreshBtn" class="btn ghost" title="Reload from disk">Refresh</button>
+  </div>
+</header>
+
+<div id="banners"></div>
+
+<nav class="tabs">
+  <button class="tab active" data-view="library">Library</button>
+  <button class="tab" data-view="add">Add games</button>
+  <button class="tab" data-view="settings">Settings</button>
+</nav>
+
+<main>
+
+  <!-- ------------------------------------------------------ library -->
+  <section id="view-library" class="view active">
+    <div class="toolbar">
+      <button id="autoAllBtn" class="btn primary">Get artwork for everything missing</button>
+      <label class="check">
+        <input type="checkbox" id="overwriteAll">
+        <span>Replace artwork I already have</span>
+      </label>
+      <input id="filter" class="search" type="search" placeholder="Filter games&hellip;">
+      <span id="libraryCount" class="muted"></span>
+    </div>
+    <div id="progress" class="progress hidden">
+      <div class="progress-bar"><div id="progressFill"></div></div>
+      <p id="progressText"></p>
+    </div>
+    <div id="gameGrid" class="game-grid"></div>
+    <div id="libraryEmpty" class="empty hidden">
+      <h2>No non-Steam games yet</h2>
+      <p>Open <strong>Add games</strong> to point SteamArt at a folder of games.</p>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------- add -->
+  <section id="view-add" class="view">
+    <div class="add-layout">
+      <aside class="places">
+        <h3>Places</h3>
+        <ul id="placesList"></ul>
+      </aside>
+      <div class="browser">
+        <div class="toolbar">
+          <button id="upBtn" class="btn ghost">Up</button>
+          <input id="pathInput" class="search grow" type="text" placeholder="/home/deck/Games">
+          <button id="goBtn" class="btn ghost">Go</button>
+          <button id="scanBtn" class="btn primary">Scan this folder</button>
+        </div>
+        <div class="options">
+          <label class="check">
+            <input type="checkbox" id="optCompat" checked>
+            <span>Set Proton for Windows <code>.exe</code> games</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="optArt" checked>
+            <span>Fetch artwork right after importing</span>
+          </label>
+        </div>
+        <div id="browseList" class="browse-list"></div>
+        <div class="toolbar sticky">
+          <button id="addSelectedBtn" class="btn primary" disabled>Add selected</button>
+          <button id="selectAllBtn" class="btn ghost">Select all found</button>
+          <span id="selectionCount" class="muted">nothing selected</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------- settings -->
+  <section id="view-settings" class="view">
+    <div class="panel">
+      <h2>SteamGridDB API key</h2>
+      <p class="muted">
+        Artwork comes from <a href="https://www.steamgriddb.com" target="_blank" rel="noopener">SteamGridDB</a>.
+        Sign in there, open <em>Preferences &rarr; API</em>, generate a key and paste it here.
+      </p>
+      <div class="row">
+        <input id="apiKeyInput" class="search grow" type="password" placeholder="paste your key">
+        <button id="saveKeyBtn" class="btn primary">Save &amp; test</button>
+      </div>
+      <p id="keyStatus" class="status"></p>
+    </div>
+
+    <div class="panel">
+      <h2>Steam</h2>
+      <div class="row">
+        <label class="field grow">
+          <span>Steam folder (leave blank to autodetect)</span>
+          <input id="steamRootInput" class="search" type="text">
+        </label>
+      </div>
+      <div class="row">
+        <label class="field grow">
+          <span>Compatibility tool for imported <code>.exe</code> games</span>
+          <select id="compatSelect"></select>
+        </label>
+      </div>
+      <div class="row wrap">
+        <label class="check"><input type="checkbox" id="setCompat"><span>Set it automatically on import</span></label>
+        <label class="check"><input type="checkbox" id="autoArtImport"><span>Fetch artwork on import</span></label>
+        <label class="check"><input type="checkbox" id="overwriteArt"><span>Replace existing artwork by default</span></label>
+        <label class="check"><input type="checkbox" id="allowNsfw"><span>Allow NSFW artwork</span></label>
+        <label class="check"><input type="checkbox" id="allowHumor"><span>Allow joke artwork</span></label>
+      </div>
+      <div class="row">
+        <button id="saveSettingsBtn" class="btn primary">Save settings</button>
+        <span id="settingsStatus" class="status"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>How this works</h2>
+      <ul class="notes">
+        <li>Shortcuts are written to <code>userdata/&lt;id&gt;/config/shortcuts.vdf</code>; a timestamped backup is kept beside it each time.</li>
+        <li>Artwork lands in <code>userdata/&lt;id&gt;/config/grid</code> using the app ID Steam derives from the executable path plus the game name.</li>
+        <li><strong>Close Steam before importing.</strong> Steam rewrites these files when it exits and will undo changes made while it is running.</li>
+        <li>Restart Steam afterwards to see everything.</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<!-- ------------------------------------------------------- art picker -->
+<div id="picker" class="modal hidden">
+  <div class="modal-card">
+    <header>
+      <h2 id="pickerTitle">Choose artwork</h2>
+      <button id="pickerClose" class="btn ghost">Close</button>
+    </header>
+    <div class="row">
+      <input id="pickerSearch" class="search grow" type="text" placeholder="Search SteamGridDB">
+      <button id="pickerSearchBtn" class="btn ghost">Search</button>
+    </div>
+    <div id="pickerGames" class="chips"></div>
+    <div id="pickerKinds" class="chips kinds"></div>
+    <div id="pickerAssets" class="asset-grid"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
