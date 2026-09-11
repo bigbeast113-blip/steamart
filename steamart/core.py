@@ -7,6 +7,7 @@ import os
 import sys
 from collections import OrderedDict
 
+from . import names as names_module
 from . import sgdb, steam, vdf
 
 # Things that live next to a game but are not the game.
@@ -385,13 +386,13 @@ class Library:
 
         try:
             if game_id is None:
-                tried = []
-                game = self.client.best_game(name, exe=exe, report=tried.append)
+                trace = []
+                game = self.client.best_game(name, exe=exe, trace=trace)
+                result["trace"] = trace
                 if not game:
-                    result["tried"] = tried
                     result["errors"]["_"] = (
-                        "No SteamGridDB match for %r (tried %s)"
-                        % (name, ", ".join(repr(q) for q in tried))
+                        "No SteamGridDB match for %r after %d searches"
+                        % (name, len(trace))
                     )
                     return result
                 game_id = game["id"]
@@ -423,6 +424,43 @@ class Library:
                 result["errors"][kind] = str(exc)
             except OSError as exc:
                 result["errors"][kind] = "could not write artwork: %s" % exc
+        return result
+
+    def preview_match(self, name, exe=None):
+        """Dry run of the title matching: what it searches and what it finds.
+
+        Installs nothing. This is what the UI shows when you ask why a game
+        ended up with the artwork it did, or with none at all.
+        """
+        result = {
+            "name": name,
+            "exe": exe,
+            "variants": names_module.query_variants(name, exe),
+            "trace": [],
+            "game": None,
+            "min_confidence": sgdb.MIN_CONFIDENCE,
+        }
+        if not self.config.get("api_key"):
+            result["error"] = ("No SteamGridDB API key set, so these searches "
+                               "have not actually been run.")
+            return result
+
+        trace = []
+        try:
+            game = self.client.best_game(name, exe=exe, trace=trace)
+        except sgdb.SGDBError as exc:
+            result["trace"] = trace
+            result["error"] = str(exc)
+            return result
+
+        result["trace"] = trace
+        if game:
+            result["game"] = {
+                "id": game["id"],
+                "name": game.get("name", ""),
+                "matched_by": game.get("_matched_by"),
+                "confidence": game.get("_confidence", 1.0),
+            }
         return result
 
     def apply_asset(self, appid, kind, url):

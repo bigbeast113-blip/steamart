@@ -264,6 +264,15 @@ class RankingTests(unittest.TestCase):
         ]
         self.assertEqual(sgdb.rank_assets(assets, "capsule")[0]["url"], "b")
 
+    def test_a_much_longer_title_gets_no_containment_bonus(self):
+        # It literally contains "handsoffate" but is a different game.
+        long_title = "MANOS: The Hands of Fate ~ Director's Cut"
+        self.assertLess(sgdb._similarity(long_title, {"handsoffate"}),
+                        sgdb.MIN_CONFIDENCE)
+
+    def test_a_similar_length_title_still_gets_the_bonus(self):
+        self.assertGreaterEqual(sgdb._similarity("Celeste", {"celestee"}), 0.9)
+
     def test_entries_without_a_url_are_dropped(self):
         self.assertEqual(sgdb.rank_assets([{"width": 600}], "capsule"), [])
 
@@ -306,6 +315,27 @@ class NameSplittingTests(unittest.TestCase):
         self.assertEqual(
             names.nice_name_for("/g/Games/HordesOfFate.exe"), "Hordes of Fate")
 
+    def test_plural_words_get_a_singular_variant(self):
+        variants = [v.lower() for v in
+                    names.query_variants("Handsoffate", "/g/Games/handsoffate.exe")]
+        self.assertIn("hands of fate", variants)
+        self.assertIn("hand of fate", variants)
+
+    def test_single_words_are_offered_as_a_last_resort(self):
+        variants = [v.lower() for v in names.query_variants("Handsoffate")]
+        self.assertIn("fate", variants,
+                      "one distinctive word is the widest net we can cast")
+
+    def test_singularize_leaves_ordinary_words_alone(self):
+        self.assertEqual(names.singularize("hand of fate"), "")
+        self.assertEqual(names.singularize("chaos of war"), "")
+        self.assertEqual(names.singularize("hands of fate"), "hand of fate")
+
+    def test_one_word_titles_are_never_singularized(self):
+        # "Hades" is not a plural "Hade".
+        self.assertEqual(names.singularize("Hades"), "")
+        self.assertNotIn("hade", [v.lower() for v in names.query_variants("Hades")])
+
     def test_variants_cover_the_squished_spelling(self):
         variants = [v.lower() for v in
                     names.query_variants("Hordesoffate", "/g/Games/hordesoffate.exe")]
@@ -346,6 +376,11 @@ class FakeSearchClient(sgdb.Client):
         {"id": 3, "name": "Fate"},
         {"id": 4, "name": "Celeste"},
         {"id": 5, "name": "Deep Rock Galactic"},
+        # Real titles, and the reason handsoffate.exe used to fail: the game is
+        # singular, and the only "Hands of Fate" title is a different game.
+        {"id": 6, "name": "Hand of Fate"},
+        {"id": 7, "name": "Hand of Fate 2"},
+        {"id": 8, "name": "MANOS: The Hands of Fate ~ Director's Cut"},
     ]
 
     def __init__(self):
@@ -409,6 +444,57 @@ class MatchingTests(unittest.TestCase):
         results = self.client.search_all("hordesoffate")
         self.assertTrue(results)
         self.assertEqual(results[0]["name"], "Hordes of Fate")
+
+    def test_plural_filename_finds_the_singular_title(self):
+        # handsoffate.exe is Hand of Fate. Searching the plural finds nothing,
+        # so the singular has to be tried too.
+        game = self.client.best_game("Handsoffate", exe="/g/Games/handsoffate.exe")
+        self.assertIsNotNone(game, "should not give up on a plural filename")
+        self.assertEqual(game["name"], "Hand of Fate")
+
+    def test_the_plural_spelling_only_finds_the_wrong_game(self):
+        # Guards the premise of the test above. Searching the plural does
+        # return something -- just the wrong game -- and it scores below the
+        # threshold, which is exactly why the singular variant is needed.
+        results = self.client.search("hands of fate")
+        self.assertEqual([g["name"] for g in results],
+                         ["MANOS: The Hands of Fate ~ Director's Cut"])
+        score = sgdb._similarity(results[0]["name"], {"handsoffate"})
+        self.assertLess(score, sgdb.MIN_CONFIDENCE)
+
+    def test_a_wrong_game_that_merely_contains_the_words_is_rejected(self):
+        # "MANOS: The Hands of Fate" literally contains "Hands of Fate" but is
+        # a different game; it must not outrank the real one.
+        game = self.client.best_game("Handsoffate", exe="/g/Games/handsoffate.exe")
+        self.assertNotIn("MANOS", game["name"])
+
+    def test_trace_records_every_attempt(self):
+        trace = []
+        game = self.client.best_game(
+            "Handsoffate", exe="/g/Games/handsoffate.exe", trace=trace)
+        self.assertEqual([step["query"] for step in trace], self.client.queries)
+        for step in trace:
+            self.assertIn("results", step)
+            self.assertIn("score", step)
+
+        # "Hand of Fate" is not spelled identically to "handsoffate", so this
+        # is a high-confidence guess rather than an exact hit, and is reported
+        # as such instead of being passed off as certain.
+        self.assertFalse(any(step.get("exact") for step in trace))
+        self.assertGreater(game["_confidence"], 0.9)
+        self.assertLess(game["_confidence"], 0.999)
+        best = max(step["score"] for step in trace)
+        self.assertAlmostEqual(best, game["_confidence"], places=3)
+
+    def test_an_exact_hit_is_marked_in_the_trace(self):
+        trace = []
+        self.client.best_game("Celeste", trace=trace)
+        self.assertTrue(any(step.get("exact") for step in trace))
+
+    def test_trace_is_attached_to_the_match(self):
+        game = self.client.best_game("Celeste", exe="/g/Celeste/Celeste.exe")
+        self.assertEqual(len(game["_trace"]), 1)
+        self.assertEqual(game["_trace"][0]["query"], "Celeste")
 
     def test_the_matching_query_is_reported(self):
         game = self.client.best_game("Hordesoffate", exe="/g/Games/hordesoffate.exe")

@@ -242,6 +242,17 @@ code { background: #0d1219; padding: 1px 5px; border-radius: 4px; font-size: 12p
 }
 .modal-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .modal-card h2 { margin: 0; font-size: 17px; }
+.details-body { overflow-y: auto; }
+.trace { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+.trace th {
+  text-align: left; padding: 6px 10px; color: var(--muted);
+  font-weight: 500; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .06em; border-bottom: 1px solid var(--line);
+}
+.trace td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.trace tr.hit td { background: rgba(139,195,74,.12); color: #cbe6a4; }
+.trace td.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+
 .stopped-card { text-align: center; padding: 34px 28px; width: min(440px, 100%); }
 .stopped-card h2 { margin: 0 0 8px; }
 .stopped-card p { margin: 0; }

@@ -27,6 +27,9 @@ def build_parser():
     ui.add_argument("--port", type=int, default=8523)
     ui.add_argument("--host", default="127.0.0.1")
     ui.add_argument("--no-browser", action="store_true", help="Do not open a browser")
+    ui.add_argument("--reuse", action="store_true",
+                    help="Attach to an instance already running instead of "
+                         "restarting it")
     ui.add_argument("--verbose", action="store_true")
 
     install = subparsers.add_parser(
@@ -123,6 +126,7 @@ def cmd_ui(library, args):
         host=getattr(args, "host", "127.0.0.1"),
         open_browser=not getattr(args, "no_browser", False),
         verbose=getattr(args, "verbose", False),
+        reuse=getattr(args, "reuse", False),
     )
 
 
@@ -286,17 +290,31 @@ def cmd_match(library, args):
         print("\nNo API key set, so no live lookup. Add one with:  steamart key YOUR_KEY")
         return 0
 
-    print("\nAsking SteamGridDB…")
-    tried = []
-    game = library.client.best_game(display, exe=exe, report=tried.append)
+    print("\nAsking SteamGridDB...")
+    trace = []
+    game = library.client.best_game(display, exe=exe, trace=trace)
+
+    print("\n%-3s %-28s %5s  %-30s %s" % ("#", "SEARCHED FOR", "HITS", "CLOSEST TITLE", "SCORE"))
+    for index, step in enumerate(trace, 1):
+        if step.get("error"):
+            print("%-3d %-28s %5s  %s" % (index, step["query"][:28], "-", step["error"]))
+            continue
+        print("%-3d %-28s %5d  %-30s %s%s" % (
+            index, step["query"][:28], step["results"],
+            (step["best"] or "-")[:30],
+            "%.0f%%" % (step["score"] * 100),
+            "  <- exact" if step.get("exact") else ""))
+
     if not game:
-        print("No match. Tried: %s" % ", ".join(tried))
-        print("Add it anyway, then use the web UI's Pick button to choose art by hand.")
+        print("\nNo match: nothing scored above %.0f%%." % (sgdb.MIN_CONFIDENCE * 100))
+        print("Rename the game to its real title, or use the web UI's Pick button.")
         return 1
+
     confidence = game.get("_confidence", 1.0)
-    print("Matched      : %s (SteamGridDB id %s)" % (game.get("name"), game.get("id")))
+    print("\nMatched      : %s (SteamGridDB id %s)" % (game.get("name"), game.get("id")))
     print("Found via    : %r" % game.get("_matched_by"))
-    print("Confidence   : %s" % ("exact" if confidence >= 0.999 else "%.0f%%" % (confidence * 100)))
+    print("Confidence   : %s"
+          % ("exact" if confidence >= 0.999 else "%.0f%%" % (confidence * 100)))
     return 0
 
 

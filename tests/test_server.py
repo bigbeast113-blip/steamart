@@ -155,6 +155,32 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(exc.code, 404)
             self.assertIn("Unknown endpoint", json.loads(exc.read().decode())["error"])
 
+    def test_match_explains_itself_without_an_api_key(self):
+        """The details panel must still show its working when no key is set."""
+        self.json_post("/api/add", {
+            "games": [{"path": self.exe, "name": "Handsoffate"}],
+            "set_compat": False, "fetch_art": False,
+        })
+        status, games = self.json_get("/api/games")
+        appid = [g for g in games["games"] if g["name"] == "Handsoffate"][0]["appid"]
+
+        status, data = self.json_get("/api/match?appid=%d" % appid)
+        self.assertEqual(status, 200)
+        self.assertIn("hands of fate", [v.lower() for v in data["variants"]])
+        self.assertIn("hand of fate", [v.lower() for v in data["variants"]])
+        self.assertIn("API key", data["error"])
+        self.assertEqual(data["trace"], [])
+
+        self.json_post("/api/remove", {"appid": appid})
+
+    def test_match_needs_something_to_look_up(self):
+        try:
+            self.get("/api/match?q=")
+            self.fail("expected a 400")
+        except urllib.error.HTTPError as exc:
+            self.assertEqual(exc.code, 400)
+            self.assertIn("name is required", json.loads(exc.read().decode())["error"])
+
     def test_state_reports_launcher_availability(self):
         status, data = self.json_get("/api/state")
         self.assertEqual(status, 200)

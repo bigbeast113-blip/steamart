@@ -200,6 +200,8 @@ function gameCard(game) {
   actions.className = 'card-actions';
   actions.appendChild(button('Get art', 'primary tiny', () => autoArt(game, card)));
   actions.appendChild(button('Pick', 'ghost tiny', () => openPicker(game)));
+  actions.appendChild(button('?', 'ghost tiny', () => showDetails(game)))
+    .title = 'Show exactly what SteamArt searched for';
   actions.appendChild(button('⋯', 'ghost tiny', (event) => gameMenu(game, event)));
   body.appendChild(actions);
 
@@ -389,6 +391,82 @@ async function removeGame(game) {
     await refreshGames();
     toast('Removed ' + game.name, 'ok');
   } catch (err) { toast(err.message, 'err'); }
+}
+
+// ------------------------------------------------------ search details
+
+async function showDetails(game) {
+  state.details = game;
+  $('#detailsTitle').textContent = 'What SteamArt searched for "' + game.name + '"';
+  const body = $('#detailsBody');
+  body.innerHTML = '<p class="muted">Running the searches…</p>';
+  $('#details').classList.remove('hidden');
+
+  let data;
+  try {
+    data = await api('match?appid=' + encodeURIComponent(game.appid));
+  } catch (err) {
+    body.innerHTML = '<p class="status err"></p>';
+    body.firstChild.textContent = err.message;
+    return;
+  }
+  body.innerHTML = '';
+
+  const intro = document.createElement('p');
+  intro.className = 'muted';
+  intro.textContent = 'The shortcut is named "' + data.name + '". Each spelling below '
+    + 'is a guess at the real title; results are scored against the name with '
+    + 'punctuation and capitals ignored.';
+  body.appendChild(intro);
+
+  const table = document.createElement('table');
+  table.className = 'trace';
+  table.innerHTML = '<thead><tr><th>#</th><th>Searched for</th><th>Hits</th>'
+    + '<th>Closest title</th><th>Score</th></tr></thead>';
+  const tbody = document.createElement('tbody');
+
+  const trace = data.trace || [];
+  const rows = trace.length ? trace : (data.variants || []).map((q) => ({ query: q }));
+  rows.forEach((step, index) => {
+    const tr = document.createElement('tr');
+    const score = typeof step.score === 'number' ? step.score : null;
+    if (step.exact) tr.className = 'hit';
+    const cells = [
+      String(index + 1),
+      step.query,
+      (step.error || step.results == null) ? '—' : String(step.results),
+      step.error || step.best || '—',
+      score == null ? '—' : Math.round(score * 100) + '%',
+    ];
+    cells.forEach((text, column) => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      if (column === 1) td.className = 'mono';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  body.appendChild(table);
+
+  const verdict = document.createElement('p');
+  if (data.error) {
+    verdict.className = 'status err';
+    verdict.textContent = data.error;
+  } else if (data.game) {
+    const exact = data.game.confidence >= 0.999;
+    verdict.className = 'status ok';
+    verdict.textContent = 'Matched "' + data.game.name + '" via '
+      + JSON.stringify(data.game.matched_by) + ' — '
+      + (exact ? 'exact match.' : Math.round(data.game.confidence * 100) + '% confident.');
+  } else {
+    verdict.className = 'status err';
+    verdict.textContent = 'Nothing scored above '
+      + Math.round((data.min_confidence || 0.55) * 100) + '%, so it reported no match '
+      + 'rather than installing artwork for the wrong game. Rename the game to the '
+      + 'real title, or pick the artwork by hand below.';
+  }
+  body.appendChild(verdict);
 }
 
 // ---------------------------------------------------------- art picker
@@ -867,6 +945,14 @@ $('#scanBtn').onclick = scanFolder;
 $('#selectAllBtn').onclick = selectAllFound;
 $('#addSelectedBtn').onclick = addSelected;
 
+$('#detailsClose').onclick = () => $('#details').classList.add('hidden');
+$('#detailsPick').onclick = () => {
+  $('#details').classList.add('hidden');
+  if (state.details) openPicker(state.details);
+};
+$('#details').addEventListener('click', (e) => {
+  if (e.target.id === 'details') $('#details').classList.add('hidden');
+});
 $('#pickerClose').onclick = () => $('#picker').classList.add('hidden');
 $('#pickerSearchBtn').onclick = searchGames;
 $('#pickerSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchGames(); });
@@ -874,7 +960,10 @@ $('#picker').addEventListener('click', (e) => {
   if (e.target.id === 'picker') $('#picker').classList.add('hidden');
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') $('#picker').classList.add('hidden');
+  if (e.key === 'Escape') {
+    $('#picker').classList.add('hidden');
+    $('#details').classList.add('hidden');
+  }
 });
 
 showView(location.hash.slice(1) || 'library');

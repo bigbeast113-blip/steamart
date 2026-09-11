@@ -99,6 +99,47 @@ def split_separators(text):
     return re.sub(r"[_.\-]+", " ", text or "")
 
 
+def singularize(text):
+    """``hands of fate`` -> ``hand of fate``.
+
+    Naive, and only ever used as an extra search query. It matters more than it
+    looks: a filename saying ``handsoffate`` is really *Hand of Fate*, and
+    searching the plural finds nothing at all.
+
+    Only applied to multi-word phrases. A one-word title is usually a proper
+    noun where the trailing "s" belongs -- "Hades" is not a plural "Hade".
+
+    Returns "" when nothing changed, so callers can skip a duplicate query.
+    """
+    source = (text or "").split()
+    if len(source) < 2:
+        return ""
+    words, changed = [], False
+    for word in source:
+        lowered = word.lower()
+        if len(word) > 3 and lowered.endswith("s") and not lowered.endswith(
+                ("ss", "us", "is", "as", "os")):
+            words.append(word[:-1])
+            changed = True
+        else:
+            words.append(word)
+    return " ".join(words) if changed else ""
+
+
+def significant_words(text, minimum=4):
+    """Content words, longest first, for last-ditch single-word searches.
+
+    Searching one word casts the widest net and lets the scoring pick the right
+    title out of the pile: "fate" surfaces *Hand of Fate* when every spelling of
+    the full name has already come back empty.
+    """
+    words = [w for w in (text or "").split()
+             if len(w) >= minimum and w.lower() not in CONNECTORS]
+    if len(words) < 2:
+        return []
+    return sorted(words, key=len, reverse=True)
+
+
 def strip_noise(words):
     """Drop build junk, and any bare version number trailing it.
 
@@ -163,7 +204,7 @@ def nice_name_for(exe):
     return pretty(" ".join(words)) or stem
 
 
-def query_variants(name, exe=None, limit=7):
+def query_variants(name, exe=None, limit=9):
     """Search spellings to try, best guess first.
 
     Every entry is a different theory about how the title was mangled. They are
@@ -184,8 +225,12 @@ def query_variants(name, exe=None, limit=7):
     add(name)
     add(simplify(name))
     add(split_camel(split_separators(name)))
-    # The squished form is what lets "hordesoffate" become "hordes of fate".
-    add(split_connectors(normalize(name)))
+    # The squished form is what lets "handsoffate" become "hands of fate".
+    joined = split_connectors(normalize(name))
+    add(joined)
+    # ...and a filename saying "hands" usually means a title saying "Hand".
+    add(singularize(joined))
+    add(singularize(split_camel(split_separators(name))))
 
     if exe:
         stem = os.path.splitext(os.path.basename(exe))[0]
@@ -201,7 +246,9 @@ def query_variants(name, exe=None, limit=7):
     # "call" finds Call of Duty where "callof" finds nothing.
     squished = normalize(name)
     if len(squished) >= 9:
-        head = split_connectors(squished).split()
+        head = joined.split()
         add(head[0] if len(head) > 1 and len(head[0]) >= 4 else squished[:6])
+        for word in significant_words(joined):
+            add(word)
 
     return out[:limit]

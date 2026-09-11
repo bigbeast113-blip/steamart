@@ -11,6 +11,7 @@ import mimetypes
 import os
 import socket
 import threading
+import time
 import traceback
 import urllib.request
 import webbrowser
@@ -205,6 +206,17 @@ class Handler(BaseHTTPRequestHandler):
                 overwrite=body.get("overwrite"),
             )
 
+        if route == "match":
+            name = query.get("q") or query.get("name") or ""
+            exe = query.get("exe") or None
+            if not name and query.get("appid"):
+                index, entry, _ = library.find_by_appid(int(query["appid"]))
+                name = steam.vdf.get_ci(entry, "AppName", "")
+                exe = steam.entry_exe(entry)
+            if not name:
+                raise ApiError("A game name is required")
+            return library.preview_match(name, exe)
+
         if route == "search":
             return {"results": library.client.search_all(
                 query.get("q", ""), exe=query.get("exe") or None)}
@@ -331,6 +343,34 @@ def _already_running(host, port, timeout=1.5):
         return False
 
 
+def _stop_existing(host, port, timeout=10.0):
+    """Ask a running instance to shut down, and wait for the port to free.
+
+    Politely, over its own quit endpoint, rather than hunting for a PID to
+    kill: the running copy gets to finish whatever write it is in the middle
+    of instead of leaving a half-written shortcut list behind.
+    """
+    if not _already_running(host, port):
+        return False
+
+    print("Stopping the SteamArt instance already running on port %d..." % port)
+    request = urllib.request.Request(
+        "http://%s:%d/api/quit" % (host, port), data=b"{}", method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(request, timeout=5).close()
+    except Exception:
+        pass
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _already_running(host, port, timeout=0.5):
+            return True
+        time.sleep(0.25)
+    print("It did not stop; starting on a different port instead.")
+    return False
+
+
 def _free_port(preferred, host="127.0.0.1"):
     for port in [preferred] + list(range(preferred + 1, preferred + 20)):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
@@ -344,13 +384,17 @@ def _free_port(preferred, host="127.0.0.1"):
 
 
 def serve(library=None, port=8523, host="127.0.0.1", open_browser=True, verbose=False,
-          reuse=True):
-    if reuse and _already_running(host, port):
-        url = "http://%s:%d/" % (host, port)
-        print("SteamArt is already running at %s - opening that instead." % url)
-        if open_browser:
-            webbrowser.open(url)
-        return
+          reuse=False):
+    if _already_running(host, port):
+        if reuse:
+            url = "http://%s:%d/" % (host, port)
+            print("SteamArt is already running at %s - opening that instead." % url)
+            if open_browser:
+                webbrowser.open(url)
+            return
+        # Default: a fresh start. Clicking the launcher should give you a
+        # current view of your library, not whatever state was left behind.
+        _stop_existing(host, port)
 
     library = library or core.Library()
     port = _free_port(port, host)

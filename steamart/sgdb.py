@@ -16,6 +16,10 @@ import urllib.request
 from . import names
 
 API_BASE = "https://www.steamgriddb.com/api/v2"
+
+# How close a title has to be before we call it a match. Below this it reports
+# a miss and shows its working, rather than installing art for the wrong game.
+MIN_CONFIDENCE = 0.55
 USER_AGENT = "SteamArt/1.0 (+https://github.com/)"
 
 # Ideal pixel size per slot. Assets that match exactly are ranked first, since
@@ -105,7 +109,7 @@ class Client:
             return []
         return self._request("/search/autocomplete/%s" % urllib.parse.quote(term, safe=""))
 
-    def best_game(self, name, exe=None, report=None):
+    def best_game(self, name, exe=None, trace=None):
         """The single most likely game for a title, or None.
 
         A filename like ``hordesoffate.exe`` will not match anything as typed,
@@ -117,41 +121,55 @@ class Client:
         punctuation and case ignored, so the correct game is recognised however
         it was spelled. The search stops early once something matches exactly.
 
-        ``report``, if given, is called with each query tried, which is how the
-        CLI explains what it did.
+        ``trace``, if given, is a list that receives one entry per query with
+        what came back and how well it scored. That is what the UI shows when
+        it reports a miss, so a bad match is explainable rather than magic.
         """
+        trace = trace if trace is not None else []
         targets = _match_targets(name, exe)
         if not targets:
             return None
 
-        best, best_score, tried = None, 0.0, []
+        best, best_score, best_query = None, 0.0, None
         for query in names.query_variants(name, exe):
-            tried.append(query)
-            if report:
-                report(query)
+            step = {"query": query, "results": 0, "best": None, "score": 0.0}
+            trace.append(step)
             try:
                 results = self.search(query)
             except SGDBAuthError:
                 raise
-            except SGDBError:
+            except SGDBError as exc:
+                step["error"] = str(exc)
                 continue
+
+            step["results"] = len(results)
+            exact = None
             for game in results:
                 score = _similarity(game.get("name", ""), targets)
-                if score >= 0.999:
-                    game = dict(game)
-                    game["_matched_by"] = query
-                    return game
+                if score > step["score"]:
+                    step["score"] = round(score, 3)
+                    step["best"] = game.get("name")
                 if score > best_score:
-                    best, best_score = game, score
+                    best, best_score, best_query = game, score, query
+                if score >= 0.999 and exact is None:
+                    exact = game
+            if exact is not None:
+                step["exact"] = True
+                exact = dict(exact)
+                exact["_matched_by"] = query
+                exact["_confidence"] = 1.0
+                exact["_trace"] = trace
+                return exact
             # A near-miss is good enough to stop burning API calls on guesses.
             if best_score >= 0.9:
                 break
 
-        if best is None or best_score < 0.55:
+        if best is None or best_score < MIN_CONFIDENCE:
             return None
         best = dict(best)
-        best["_matched_by"] = tried[-1] if tried else name
+        best["_matched_by"] = best_query
         best["_confidence"] = round(best_score, 3)
+        best["_trace"] = trace
         return best
 
     def search_all(self, name, exe=None, limit=12):
@@ -305,8 +323,13 @@ def _similarity(candidate, targets):
         if normalized == target:
             return 1.0
         score = difflib.SequenceMatcher(None, normalized, target).ratio()
-        # Short targets match too many things by accident to trust containment.
-        if len(target) >= 5:
+        # A prefix or substring hit is strong evidence, but only when the two
+        # titles are a similar length. "MANOS: The Hands of Fate ~ Director's
+        # Cut" contains "handsoffate" and is a completely different game, so
+        # the bonus is withheld once one title dwarfs the other. Short targets
+        # match too many things by accident to trust at all.
+        span = min(len(normalized), len(target)) / max(len(normalized), len(target))
+        if len(target) >= 5 and span >= 0.5:
             if normalized.startswith(target) or target.startswith(normalized):
                 score = max(score, 0.9)
             elif target in normalized or normalized in target:

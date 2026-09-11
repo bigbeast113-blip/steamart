@@ -64,8 +64,11 @@ menu that:
 - runs without opening a terminal window;
 - calls the Python interpreter directly, so it works even from a ZIP download
   where `run.sh` lost its execute bit;
-- reopens the existing tab if SteamArt is already running, rather than
-  starting a second copy that fights over the same files.
+- replaces a copy that's already running, so you always get a current view of
+  your library rather than whatever state was left behind. It asks the old
+  instance to quit over its own endpoint rather than killing the process, so
+  it can finish any write it's partway through. Pass `--reuse` to attach to
+  the running one instead.
 
 Use the **Quit** button in the top right to stop it — with no terminal
 attached there's no Ctrl+C.
@@ -126,14 +129,16 @@ Game executables are rarely named like the game. `hordesoffate.exe` matches
 nothing if you search it literally, so SteamArt tries several spellings and
 keeps whichever result actually corresponds to the title:
 
-| Attempt | Query for `hordesoffate.exe` |
+| Attempt | Query for `handsoffate.exe` |
 |---|---|
-| the name as given | `Hordesoffate` |
+| the name as given | `Handsoffate` |
 | edition junk stripped | *(no change here)* |
-| camel case split | `Hordes Of Fate` for `HordesOfFate.exe` |
-| **joining words split** | `hordes of fate` |
-| the parent folder | `Hordes of Fate`, if the folder is named that |
-| a prefix, last resort | `hordes` |
+| camel case split | `Hands Of Fate` for `HandsOfFate.exe` |
+| **joining words split** | `hands of fate` |
+| **plural made singular** | `hand of fate` |
+| the parent folder | `Hand of Fate`, if the folder is named that |
+| a prefix | `hands` |
+| one distinctive word | `fate` |
 
 Results from every attempt are compared against the original title with
 punctuation, spacing and case removed — so `Hordes of Fate` is recognised as an
@@ -141,32 +146,42 @@ exact match for `hordesoffate` and wins immediately. The search stops as soon
 as something matches exactly, and only settles for a fuzzy match above 55%
 similarity. Below that it reports no match rather than guessing.
 
-Generic parent folders (`Games`, `Downloads`, `SteamLibrary`, …) are ignored
-for both searching and matching, so a game in `C:\Games` can't end up with
-artwork for something called "Games".
+The plural rule earns its keep. `handsoffate.exe` is **Hand of Fate** —
+singular. Searching the plural finds only *MANOS: The Hands of Fate*, a
+completely different game, so without the singular variant you get nothing:
 
-You can see all of this without touching your library:
+```
+#   SEARCHED FOR         HITS  CLOSEST TITLE                        SCORE
+1   Handsoffate             0  -                                      0%
+2   hands of fate           1  MANOS: The Hands of Fate ~ Directo…   52%
+3   hand of fate            3  Hand of Fate                          95%
+```
+
+Two guards stop a near-miss becoming a wrong answer:
+
+- Generic parent folders (`Games`, `Downloads`, `SteamLibrary`, …) are ignored
+  for both searching and matching, so a game in `C:\Games` can't end up with
+  artwork for something called "Games".
+- A title that merely *contains* your name gets no credit for it when one
+  dwarfs the other. *MANOS: The Hands of Fate ~ Director's Cut* contains
+  "handsoffate" but is three times longer, so it scores 52% and is rejected
+  rather than being handed a substring bonus.
+
+## Seeing what it searched for
+
+Press **?** on any game card. It reruns the whole search and shows you the
+table above: every spelling it tried, how many hits came back, the closest
+title, and its score. When nothing matched it says so and offers to open the
+manual picker.
+
+From the terminal, the same thing without touching your library:
 
 ```bash
 ./run.sh match "C:/Games/hordesoffate.exe"
 ```
 
-```
-Display name : Hordesoffate
-
-Searches it would try, in order:
-  1. Hordesoffate
-  2. hordes of fate
-  3. hordes
-
-Asking SteamGridDB…
-Matched      : Hordes of Fate (SteamGridDB id 5432)
-Found via    : 'hordes of fate'
-Confidence   : exact
-```
-
 When the match isn't exact, the library card and the CLI both say so
-(`→ Hordes of Fate (best guess): added capsule, wide, hero`), so you can spot a
+(`→ Hand of Fate (best guess): added capsule, wide, hero`), so you can spot a
 wrong guess and fix it with **Pick**.
 
 Two things that improve matching a lot: keep each game in a folder named after
