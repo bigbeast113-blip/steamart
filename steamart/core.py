@@ -270,7 +270,8 @@ class Library:
             for game in added:
                 if progress:
                     progress(game["name"])
-                art_results.append(self.auto_art(game["appid"], name=game["name"]))
+                art_results.append(self.auto_art(
+                    game["appid"], name=game["name"], exe=game["path"]))
 
         return {
             "added": added,
@@ -337,7 +338,8 @@ class Library:
 
     # -- artwork ----------------------------------------------------------
 
-    def auto_art(self, appid, name=None, kinds=None, game_id=None, overwrite=None):
+    def auto_art(self, appid, name=None, kinds=None, game_id=None, overwrite=None,
+                 exe=None):
         """Fetch and install the top-ranked artwork for every slot.
 
         This is the main path: search SteamGridDB for the title, take the best
@@ -351,12 +353,17 @@ class Library:
             overwrite = self.config.get("overwrite_existing_art", False)
         kinds = list(kinds or steam.ART_KINDS)
 
-        if name is None:
+        # The executable path is a second source of truth for the title: the
+        # folder above it is often spelled better than the file itself.
+        if name is None or exe is None:
             try:
                 _, entry, _ = self.find_by_appid(appid)
-                name = vdf.get_ci(entry, "AppName", "")
+                if name is None:
+                    name = vdf.get_ci(entry, "AppName", "")
+                if exe is None:
+                    exe = steam.entry_exe(entry)
             except steam.SteamError:
-                name = ""
+                name = name or ""
 
         result = {
             "appid": appid,
@@ -378,14 +385,24 @@ class Library:
 
         try:
             if game_id is None:
-                game = self.client.best_game(name)
+                tried = []
+                game = self.client.best_game(name, exe=exe, report=tried.append)
                 if not game:
-                    result["errors"]["_"] = "No SteamGridDB match for %r" % name
+                    result["tried"] = tried
+                    result["errors"]["_"] = (
+                        "No SteamGridDB match for %r (tried %s)"
+                        % (name, ", ".join(repr(q) for q in tried))
+                    )
                     return result
                 game_id = game["id"]
-                result["game"] = {"id": game["id"], "name": game.get("name", "")}
+                result["game"] = {
+                    "id": game["id"],
+                    "name": game.get("name", ""),
+                    "matched_by": game.get("_matched_by"),
+                    "confidence": game.get("_confidence", 1.0),
+                }
             else:
-                result["game"] = {"id": game_id, "name": name}
+                result["game"] = {"id": game_id, "name": name, "confidence": 1.0}
         except sgdb.SGDBError as exc:
             result["errors"]["_"] = str(exc)
             return result

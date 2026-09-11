@@ -205,7 +205,8 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         if route == "search":
-            return {"results": library.client.search(query.get("q", ""))}
+            return {"results": library.client.search_all(
+                query.get("q", ""), exe=query.get("exe") or None)}
 
         if route == "candidates":
             kind = query.get("kind", "capsule")

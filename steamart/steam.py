@@ -15,7 +15,7 @@ import time
 import zlib
 from collections import OrderedDict
 
-from . import vdf
+from . import names, vdf
 
 STEAM_ID64_BASE = 76561197960265728
 
@@ -357,33 +357,9 @@ def make_shortcut(exe, app_name=None, start_dir=None, launch_options="",
     return entry
 
 
-_NAME_NOISE = (
-    "setup", "launcher", "launch", "start", "game", "play", "win64", "win32",
-    "x64", "x86", "shipping", "release", "final", "retail", "steam",
-)
-
-
-def nice_name_for(exe):
-    """Turn ``.../Hollow_Knight/hollow_knight-Win64-Shipping.exe`` into a title.
-
-    Filenames are noisy, so when the executable's own name is mostly junk we
-    fall back to the containing folder, which is usually the real game name.
-    """
-    base = os.path.splitext(os.path.basename(exe))[0]
-    folder = os.path.basename(os.path.dirname(exe))
-    if _is_noise(base) and folder and not _is_noise(folder):
-        base = folder
-    for separator in ("_", "-", "."):
-        base = base.replace(separator, " ")
-    words = [w for w in base.split() if w and w.lower() not in _NAME_NOISE]
-    if not words:
-        words = [os.path.splitext(os.path.basename(exe))[0]]
-    return " ".join(w if w.isupper() else w[:1].upper() + w[1:] for w in words)
-
-
-def _is_noise(text):
-    cleaned = text.lower().replace("_", " ").replace("-", " ")
-    return all(word in _NAME_NOISE or word.isdigit() for word in cleaned.split())
+# Filename-to-title handling lives in names.py; re-exported so callers can keep
+# reaching for it here alongside the rest of the shortcut helpers.
+nice_name_for = names.nice_name_for
 
 
 # --------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from collections import OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from steamart import core, sgdb, steam, vdf  # noqa: E402
+from steamart import core, names, sgdb, steam, vdf  # noqa: E402
 
 
 class BinaryVdfTests(unittest.TestCase):
@@ -268,7 +268,151 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(sgdb.rank_assets([{"width": 600}], "capsule"), [])
 
     def test_edition_noise_is_stripped_for_retries(self):
-        self.assertEqual(sgdb._simplify("Skyrim [GOTY Edition] (v1.9)"), "Skyrim")
+        self.assertEqual(names.simplify("Skyrim [GOTY Edition] (v1.9)"), "Skyrim")
+
+
+class NameSplittingTests(unittest.TestCase):
+    def test_squished_titles_split_on_joining_words(self):
+        cases = {
+            "hordesoffate": "hordes of fate",
+            "callofduty": "call of duty",
+            "ageofempires": "age of empires",
+            "swordandshield": "sword and shield",
+        }
+        for squished, expected in cases.items():
+            self.assertEqual(names.split_connectors(squished), expected, squished)
+
+    def test_real_words_are_not_split_apart(self):
+        # "professor" contains "of" and "brotherhood" contains "the"; only the
+        # latter has enough letters either side to trip the rule, which is why
+        # this split never reaches a visible label.
+        self.assertEqual(names.split_connectors("professor"), "professor")
+        self.assertEqual(names.split_connectors("software"), "software")
+
+    def test_camel_case_splits(self):
+        self.assertEqual(names.split_camel("HordesOfFate"), "Hordes Of Fate")
+        self.assertEqual(names.split_camel("HUDManager"), "HUD Manager")
+
+    def test_joining_words_are_lowercased_in_display_names(self):
+        self.assertEqual(names.pretty("Hordes Of Fate"), "Hordes of Fate")
+        self.assertEqual(names.pretty("FSD galactic"), "FSD Galactic")
+
+    def test_folder_wins_when_it_spells_the_same_title_better(self):
+        self.assertEqual(
+            names.nice_name_for("/g/Hordes of Fate/hordesoffate.exe"),
+            "Hordes of Fate")
+
+    def test_camel_case_filename_without_a_helpful_folder(self):
+        self.assertEqual(
+            names.nice_name_for("/g/Games/HordesOfFate.exe"), "Hordes of Fate")
+
+    def test_variants_cover_the_squished_spelling(self):
+        variants = [v.lower() for v in
+                    names.query_variants("Hordesoffate", "/g/Games/hordesoffate.exe")]
+        self.assertIn("hordesoffate", variants)
+        self.assertIn("hordes of fate", variants)
+        self.assertIn("hordes", variants)   # prefix, the last resort
+
+    def test_generic_parent_folders_are_never_searched(self):
+        for folder in ("Games", "Downloads", "SteamLibrary", "common", "C:"):
+            variants = [v.lower() for v in names.query_variants(
+                "Hordesoffate", "/%s/hordesoffate.exe" % folder)]
+            self.assertNotIn(folder.lower(), variants, folder)
+
+    def test_a_generic_folder_is_not_an_acceptable_match(self):
+        # Without this guard a real game called "Games" would score a perfect
+        # match for anything sitting in a Games folder.
+        self.assertNotIn("games",
+                         sgdb._match_targets("Hordesoffate", "/x/Games/hordesoffate.exe"))
+        self.assertIn("hordesoffate",
+                      sgdb._match_targets("Hordesoffate", "/x/Games/hordesoffate.exe"))
+
+    def test_a_real_folder_name_is_still_used(self):
+        targets = sgdb._match_targets("Hordesoffate", "/x/Hordes of Fate/hordesoffate.exe")
+        self.assertIn("hordesoffate", targets)
+
+    def test_variants_are_deduped_and_capped(self):
+        variants = names.query_variants("Celeste", "/g/Celeste/Celeste.exe")
+        self.assertEqual(len(variants), len(set(v.lower() for v in variants)))
+        self.assertLessEqual(len(variants), 7)
+
+
+class FakeSearchClient(sgdb.Client):
+    """A Client whose search() answers from a fixed catalogue, no network."""
+
+    CATALOGUE = [
+        {"id": 1, "name": "Hordes of Fate"},
+        {"id": 2, "name": "Hordes of the Underdark"},
+        {"id": 3, "name": "Fate"},
+        {"id": 4, "name": "Celeste"},
+        {"id": 5, "name": "Deep Rock Galactic"},
+    ]
+
+    def __init__(self):
+        super().__init__("fake-key")
+        self.queries = []
+
+    def search(self, term):
+        """Word-prefix matching, the way a real autocomplete behaves.
+
+        The important property: searching the squished "hordesoffate" finds
+        nothing, because no *word* of any title starts with it. That is exactly
+        the failure the variant list exists to work around.
+        """
+        self.queries.append(term)
+        needles = [names.normalize(w) for w in (term or "").split()]
+        needles = [n for n in needles if n]
+        if not needles:
+            return []
+        out = []
+        for game in self.CATALOGUE:
+            words = [names.normalize(w) for w in game["name"].split()]
+            if all(any(w.startswith(n) for w in words) for n in needles):
+                out.append(game)
+        return out
+
+
+class MatchingTests(unittest.TestCase):
+    def setUp(self):
+        self.client = FakeSearchClient()
+
+    def test_squished_filename_finds_the_right_game(self):
+        game = self.client.best_game("Hordesoffate", exe="/g/Games/hordesoffate.exe")
+        self.assertIsNotNone(game)
+        self.assertEqual(game["name"], "Hordes of Fate")
+
+    def test_it_gives_up_on_the_literal_spelling_and_retries(self):
+        self.client.best_game("Hordesoffate", exe="/g/Games/hordesoffate.exe")
+        self.assertGreater(len(self.client.queries), 1,
+                           "should have tried more than the literal name")
+        self.assertEqual(self.client.queries[0], "Hordesoffate")
+
+    def test_an_exact_match_stops_early(self):
+        self.client.best_game("Celeste", exe="/g/Celeste/Celeste.exe")
+        self.assertEqual(self.client.queries, ["Celeste"])
+
+    def test_folder_name_rescues_an_unhelpful_filename(self):
+        game = self.client.best_game(
+            names.nice_name_for("/g/Deep Rock Galactic/FSD-Win64-Shipping.exe"),
+            exe="/g/Deep Rock Galactic/FSD-Win64-Shipping.exe")
+        self.assertIsNotNone(game)
+        self.assertEqual(game["name"], "Deep Rock Galactic")
+
+    def test_a_close_relative_does_not_beat_the_exact_title(self):
+        game = self.client.best_game("hordesoffate")
+        self.assertEqual(game["name"], "Hordes of Fate")
+
+    def test_nonsense_matches_nothing(self):
+        self.assertIsNone(self.client.best_game("zzzqqqxxwv", exe=None))
+
+    def test_search_all_ranks_the_best_title_first(self):
+        results = self.client.search_all("hordesoffate")
+        self.assertTrue(results)
+        self.assertEqual(results[0]["name"], "Hordes of Fate")
+
+    def test_the_matching_query_is_reported(self):
+        game = self.client.best_game("Hordesoffate", exe="/g/Games/hordesoffate.exe")
+        self.assertEqual(names.normalize(game["_matched_by"]), "hordesoffate")
 
 
 class ProtonNamingTests(unittest.TestCase):

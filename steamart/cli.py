@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
-from . import __version__, core, server, sgdb, steam
+from . import __version__, core, names, server, sgdb, steam
 
 TICK = "+"
 CROSS = "-"
@@ -49,6 +50,10 @@ def build_parser():
     art.add_argument("--overwrite", action="store_true", help="Replace artwork that already exists")
     art.add_argument("--kinds", help="Comma-separated slots, e.g. capsule,hero")
 
+    match = subparsers.add_parser(
+        "match", help="Dry run: show how a name would be searched and matched")
+    match.add_argument("name", help="A game name, or a path to its .exe")
+
     remove = subparsers.add_parser("remove", help="Remove a non-Steam game")
     remove.add_argument("name")
     remove.add_argument("--keep-art", action="store_true")
@@ -88,6 +93,7 @@ def main(argv=None):
         "scan": cmd_scan,
         "add": cmd_add,
         "art": cmd_art,
+        "match": cmd_match,
         "remove": cmd_remove,
     }
     try:
@@ -226,6 +232,37 @@ def cmd_art(library, args):
     return 0
 
 
+def cmd_match(library, args):
+    """Explain the matching for one name. Touches nothing."""
+    raw = args.name
+    exe = raw if os.path.sep in raw or raw.lower().endswith(".exe") else None
+    display = names.nice_name_for(exe) if exe else raw
+
+    print("Input        : %s" % raw)
+    if exe:
+        print("Display name : %s" % display)
+    print("\nSearches it would try, in order:")
+    for index, query in enumerate(names.query_variants(display, exe), 1):
+        print("  %d. %s" % (index, query))
+
+    if not library.config.get("api_key"):
+        print("\nNo API key set, so no live lookup. Add one with:  steamart key YOUR_KEY")
+        return 0
+
+    print("\nAsking SteamGridDB…")
+    tried = []
+    game = library.client.best_game(display, exe=exe, report=tried.append)
+    if not game:
+        print("No match. Tried: %s" % ", ".join(tried))
+        print("Add it anyway, then use the web UI's Pick button to choose art by hand.")
+        return 1
+    confidence = game.get("_confidence", 1.0)
+    print("Matched      : %s (SteamGridDB id %s)" % (game.get("name"), game.get("id")))
+    print("Found via    : %r" % game.get("_matched_by"))
+    print("Confidence   : %s" % ("exact" if confidence >= 0.999 else "%.0f%%" % (confidence * 100)))
+    return 0
+
+
 def cmd_remove(library, args):
     _warn_if_steam_running()
     matches = [g for g in library.games() if args.name.lower() in g["name"].lower()]
@@ -254,10 +291,22 @@ def _print_art_result(result, indent=""):
             parts.append("%s !" % kind)
         elif kind in result.get("skipped", {}):
             parts.append("%s ." % kind)
-    print("%s%s  %s" % (indent, result.get("name", ""), "  ".join(parts)))
+
+    label = result.get("name", "")
+    game = result.get("game") or {}
+    matched = game.get("name") or ""
+    if matched and _squash(matched) != _squash(label):
+        label = "%s -> %s%s" % (
+            label, matched,
+            " (best guess)" if game.get("confidence", 1) < 0.999 else "")
+    print("%s%s  %s" % (indent, label, "  ".join(parts)))
     for kind, message in result.get("errors", {}).items():
         if kind != "_":
             print("%s   %s: %s" % (indent, kind, message))
+
+
+def _squash(text):
+    return names.normalize(text)
 
 
 def _warn_if_steam_running():

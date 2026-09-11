@@ -5,13 +5,15 @@ Get a free key at https://www.steamgriddb.com/profile/preferences/api
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
-import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from . import names
 
 API_BASE = "https://www.steamgriddb.com/api/v2"
 USER_AGENT = "SteamArt/1.0 (+https://github.com/)"
@@ -103,29 +105,81 @@ class Client:
             return []
         return self._request("/search/autocomplete/%s" % urllib.parse.quote(term, safe=""))
 
-    def best_game(self, name):
+    def best_game(self, name, exe=None, report=None):
         """The single most likely game for a title, or None.
 
-        SteamGridDB's autocomplete is already relevance-ordered, but an exact
-        title match further down the list beats a fuzzy one at the top.
+        A filename like ``hordesoffate.exe`` will not match anything as typed,
+        so several spellings are tried in turn -- the name as given, with the
+        edition junk stripped, split on camel case, split on joining words
+        (``hordes of fate``), the parent folder's name, and finally a prefix.
+
+        Results from every attempt are scored against the original title with
+        punctuation and case ignored, so the correct game is recognised however
+        it was spelled. The search stops early once something matches exactly.
+
+        ``report``, if given, is called with each query tried, which is how the
+        CLI explains what it did.
         """
-        results = self.search(name)
-        if not results:
-            # Retry without bracketed junk and edition suffixes, which are the
-            # usual reason a folder name fails to match.
-            cleaned = _simplify(name)
-            if cleaned and cleaned.lower() != name.strip().lower():
-                results = self.search(cleaned)
-        if not results:
+        targets = _match_targets(name, exe)
+        if not targets:
             return None
-        target = _normalize(name)
-        for game in results:
-            if _normalize(game.get("name", "")) == target:
-                return game
-        for game in results:
-            if _normalize(game.get("name", "")).startswith(target):
-                return game
-        return results[0]
+
+        best, best_score, tried = None, 0.0, []
+        for query in names.query_variants(name, exe):
+            tried.append(query)
+            if report:
+                report(query)
+            try:
+                results = self.search(query)
+            except SGDBAuthError:
+                raise
+            except SGDBError:
+                continue
+            for game in results:
+                score = _similarity(game.get("name", ""), targets)
+                if score >= 0.999:
+                    game = dict(game)
+                    game["_matched_by"] = query
+                    return game
+                if score > best_score:
+                    best, best_score = game, score
+            # A near-miss is good enough to stop burning API calls on guesses.
+            if best_score >= 0.9:
+                break
+
+        if best is None or best_score < 0.55:
+            return None
+        best = dict(best)
+        best["_matched_by"] = tried[-1] if tried else name
+        best["_confidence"] = round(best_score, 3)
+        return best
+
+    def search_all(self, name, exe=None, limit=12):
+        """Merged results from every spelling, most likely first.
+
+        The manual picker uses this so a squished filename still puts the right
+        game at the front of the list instead of returning nothing at all.
+        """
+        targets = _match_targets(name, exe)
+        merged, seen = [], set()
+        for query in names.query_variants(name, exe):
+            try:
+                results = self.search(query)
+            except SGDBAuthError:
+                raise
+            except SGDBError:
+                continue
+            for position, game in enumerate(results):
+                if game.get("id") in seen:
+                    continue
+                seen.add(game.get("id"))
+                merged.append((-_similarity(game.get("name", ""), targets),
+                               position, game))
+            if merged and -merged[0][0] >= 0.999 and len(merged) >= limit:
+                break
+
+        merged.sort(key=lambda item: item[:2])
+        return [game for _, _, game in merged[:limit]]
 
     # -- assets -----------------------------------------------------------
 
@@ -219,20 +273,43 @@ def _extension_for(url, content_type):
     return extension if extension in (".png", ".jpg", ".jpeg", ".webp", ".ico") else ".png"
 
 
-_EDITION_NOISE = re.compile(
-    r"\b(goty|game of the year|definitive|deluxe|ultimate|complete|remastered|"
-    r"enhanced|anniversary|collectors?|special|standard|edition|repack|"
-    r"early access|demo|beta|v?\d+[\d.]*)\b",
-    re.IGNORECASE,
-)
+def _match_targets(name, exe=None):
+    """Normalized spellings that would each count as the right game.
+
+    A generic parent folder is deliberately excluded: treating ``Games`` as an
+    acceptable title is how you end up installing art for some other game that
+    happens to be called that.
+    """
+    targets = {names.normalize(name)}
+    if exe:
+        stem = os.path.splitext(os.path.basename(exe))[0]
+        folder = os.path.basename(os.path.dirname(exe))
+        targets.add(names.normalize(stem))
+        if not names.is_generic_folder(folder):
+            targets.add(names.normalize(folder))
+    targets.discard("")
+    return targets
 
 
-def _simplify(name):
-    """Drop bracketed tags and edition words from a scraped folder name."""
-    text = re.sub(r"[\[(<{].*?[\])>}]", " ", name or "")
-    text = _EDITION_NOISE.sub(" ", text)
-    return re.sub(r"\s+", " ", text).strip(" -_:")
+def _similarity(candidate, targets):
+    """How well a SteamGridDB result matches any spelling of what we wanted.
 
-
-def _normalize(name):
-    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+    Compared on the normalized forms, so ``Hordes of Fate`` scores a perfect
+    match against ``hordesoffate``.
+    """
+    normalized = names.normalize(candidate)
+    if not normalized:
+        return 0.0
+    best = 0.0
+    for target in targets:
+        if normalized == target:
+            return 1.0
+        score = difflib.SequenceMatcher(None, normalized, target).ratio()
+        # Short targets match too many things by accident to trust containment.
+        if len(target) >= 5:
+            if normalized.startswith(target) or target.startswith(normalized):
+                score = max(score, 0.9)
+            elif target in normalized or normalized in target:
+                score = max(score, 0.8)
+        best = max(best, score)
+    return best

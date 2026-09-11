@@ -85,6 +85,59 @@ Steam directly will silently orphan the art.
 
 ---
 
+## Matching awkward filenames
+
+Game executables are rarely named like the game. `hordesoffate.exe` matches
+nothing if you search it literally, so SteamArt tries several spellings and
+keeps whichever result actually corresponds to the title:
+
+| Attempt | Query for `hordesoffate.exe` |
+|---|---|
+| the name as given | `Hordesoffate` |
+| edition junk stripped | *(no change here)* |
+| camel case split | `Hordes Of Fate` for `HordesOfFate.exe` |
+| **joining words split** | `hordes of fate` |
+| the parent folder | `Hordes of Fate`, if the folder is named that |
+| a prefix, last resort | `hordes` |
+
+Results from every attempt are compared against the original title with
+punctuation, spacing and case removed — so `Hordes of Fate` is recognised as an
+exact match for `hordesoffate` and wins immediately. The search stops as soon
+as something matches exactly, and only settles for a fuzzy match above 55%
+similarity. Below that it reports no match rather than guessing.
+
+Generic parent folders (`Games`, `Downloads`, `SteamLibrary`, …) are ignored
+for both searching and matching, so a game in `C:\Games` can't end up with
+artwork for something called "Games".
+
+You can see all of this without touching your library:
+
+```bash
+./run.sh match "C:/Games/hordesoffate.exe"
+```
+
+```
+Display name : Hordesoffate
+
+Searches it would try, in order:
+  1. Hordesoffate
+  2. hordes of fate
+  3. hordes
+
+Asking SteamGridDB…
+Matched      : Hordes of Fate (SteamGridDB id 5432)
+Found via    : 'hordes of fate'
+Confidence   : exact
+```
+
+When the match isn't exact, the library card and the CLI both say so
+(`→ Hordes of Fate (best guess): added capsule, wide, hero`), so you can spot a
+wrong guess and fix it with **Pick**.
+
+Two things that improve matching a lot: keep each game in a folder named after
+it, and edit the name box next to a game in the **Add games** list before
+importing — that name is what gets searched.
+
 ## Command line
 
 ```bash
@@ -93,6 +146,7 @@ Steam directly will silently orphan the art.
 ./run.sh scan ~/Games                # list game executables it can see
 ./run.sh add ~/Games/Hades/Hades.exe # import (fetches art and sets Proton)
 ./run.sh list                        # every game and which slots are filled
+./run.sh match hordesoffate.exe      # dry run: how a name would be searched
 ./run.sh art                         # fill in every empty slot, everywhere
 ./run.sh art Hades --overwrite       # redo one game from scratch
 ./run.sh remove Hades                # drop it and its artwork

@@ -218,12 +218,21 @@ function cardStatus(card, message, kind) {
   }
 }
 
+const norm = (text) => (text || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
 function summarize(result) {
   const applied = Object.keys(result.applied || {});
   const errors = Object.keys(result.errors || {});
   if (errors.includes('_')) return { text: result.errors._, kind: 'err' };
   if (applied.length) {
-    return { text: 'added ' + applied.join(', '), kind: 'ok' };
+    // Show what it matched when the title differs from the shortcut name, so a
+    // filename like hordesoffate.exe does not quietly pick the wrong game.
+    const matched = result.game && result.game.name;
+    const guess = result.game && result.game.confidence < 0.999;
+    const prefix = (matched && norm(matched) !== norm(result.name))
+      ? '→ ' + matched + (guess ? ' (best guess)' : '') + ': '
+      : '';
+    return { text: prefix + 'added ' + applied.join(', '), kind: 'ok' };
   }
   if (errors.length) return { text: result.errors[errors[0]], kind: 'err' };
   const skipped = result.skipped || {};
@@ -383,7 +392,7 @@ async function openPicker(game) {
     toast('Add a SteamGridDB API key in Settings first.', 'err');
     return;
   }
-  state.picker = { appid: game.appid, gameId: null, kind: 'capsule' };
+  state.picker = { appid: game.appid, gameId: null, kind: 'capsule', exe: game.exe };
   $('#pickerTitle').textContent = 'Artwork for ' + game.name;
   $('#pickerSearch').value = game.name;
   $('#pickerAssets').innerHTML = '';
@@ -414,7 +423,8 @@ async function searchGames() {
   const host = $('#pickerGames');
   host.innerHTML = '<span class="muted">searching…</span>';
   try {
-    const data = await api('search?q=' + encodeURIComponent(term));
+    const data = await api('search?q=' + encodeURIComponent(term)
+      + (state.picker.exe ? '&exe=' + encodeURIComponent(state.picker.exe) : ''));
     const results = (data.results || []).slice(0, 10);
     host.innerHTML = '';
     if (!results.length) {
