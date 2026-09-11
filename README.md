@@ -169,10 +169,16 @@ Two guards stop a near-miss becoming a wrong answer:
 
 ## Seeing what it searched for
 
-Press **?** on any game card. It reruns the whole search and shows you the
-table above: every spelling it tried, how many hits came back, the closest
-title, and its score. When nothing matched it says so and offers to open the
-manual picker.
+Press **?** on any game card. It shows two tables:
+
+1. **Every spelling it tried** — hits returned, closest title, score, with the
+   winning row highlighted.
+2. **What artwork exists** for the matched game, slot by slot, how many images
+   SteamGridDB has, the size of the top-rated one, and whether it is installed
+   on your machine yet.
+
+If anything is available but not installed there's a button to fetch just
+those. When nothing matched at all it says so and offers the manual picker.
 
 From the terminal, the same thing without touching your library:
 

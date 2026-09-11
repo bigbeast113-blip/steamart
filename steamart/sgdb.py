@@ -78,7 +78,10 @@ class Client:
             if exc.code in (401, 403):
                 raise SGDBAuthError("SteamGridDB rejected the API key (HTTP %d)" % exc.code)
             if exc.code == 404:
-                return {"success": True, "data": []}
+                # Must be an empty list, not a dict: callers test the result
+                # for emptiness to decide whether to retry with fewer filters,
+                # and a dict is truthy.
+                return []
             if exc.code == 429:
                 raise SGDBError("SteamGridDB rate limit hit; wait a moment and retry")
             raise SGDBError("SteamGridDB returned HTTP %d for %s" % (exc.code, path))
@@ -202,32 +205,50 @@ class Client:
     # -- assets -----------------------------------------------------------
 
     def assets(self, game_id, kind, nsfw=False, humor=False, animated=False):
-        """Artwork candidates for one slot, best first."""
+        """Artwork candidates for one slot, best first.
+
+        Filters are relaxed in stages rather than all at once. Asking for the
+        ideal size first gets the best image when one exists; falling back to
+        any size gets *an* image rather than leaving the slot empty, which is
+        what makes a game look unfinished in the Steam library. The NSFW and
+        humor filters are never relaxed -- those are the user's choice.
+        """
         from .steam import ART_KINDS
 
         spec = ART_KINDS[kind]
-        params = {
+        base = {
             "nsfw": "false" if not nsfw else "any",
             "humor": "false" if not humor else "any",
-            "types": "static,animated" if animated else "static",
         }
+
+        attempts = []
         if spec["dimensions"]:
-            params["dimensions"] = spec["dimensions"]
+            attempts.append(dict(base, types="static", dimensions=spec["dimensions"]))
+        attempts.append(dict(base, types="static"))
+        if not animated:
+            # Last resort: an animated cover beats no cover. rank_assets keeps
+            # these below anything static.
+            attempts.append(dict(base))
+        else:
+            attempts.insert(0, dict(base, types="static,animated"))
 
-        try:
-            data = self._request("/%s/game/%s" % (spec["endpoint"], game_id), params)
-        except SGDBError:
-            if not spec["dimensions"]:
+        path = "/%s/game/%s" % (spec["endpoint"], game_id)
+        last_error = None
+        for params in attempts:
+            try:
+                data = self._request(path, params)
+            except SGDBAuthError:
                 raise
-            # A game may have art in an unusual size; better an odd size than none.
-            params.pop("dimensions", None)
-            data = self._request("/%s/game/%s" % (spec["endpoint"], game_id), params)
+            except SGDBError as exc:
+                last_error = exc
+                continue
+            ranked = rank_assets(data, kind)
+            if ranked:
+                return ranked
 
-        if not data and spec["dimensions"]:
-            params.pop("dimensions", None)
-            data = self._request("/%s/game/%s" % (spec["endpoint"], game_id), params)
-
-        return rank_assets(data, kind)
+        if last_error is not None:
+            raise last_error
+        return []
 
     def best_asset(self, game_id, kind, **kwargs):
         candidates = self.assets(game_id, kind, **kwargs)
@@ -255,9 +276,11 @@ def rank_assets(assets, kind):
     SteamGridDB returns things roughly by popularity. We keep that as the
     backbone and lift exact-size, well-voted, non-animated art above it.
     """
+    if not isinstance(assets, list):
+        return []
     ideal = IDEAL_SIZE.get(kind)
     ranked = []
-    for position, asset in enumerate(assets or []):
+    for position, asset in enumerate(assets):
         if not isinstance(asset, dict) or not asset.get("url"):
             continue
         width = asset.get("width") or 0

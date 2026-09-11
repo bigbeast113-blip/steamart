@@ -264,9 +264,14 @@ async function autoArt(game, card) {
     });
     const summary = summarize(result);
     cardStatus(card, summary.text, summary.kind);
+    if (summary.kind === 'err') {
+      // The card line is small and easy to miss; say it out loud too.
+      toast(game.name + ': ' + summary.text + '  (press ? for details)', 'err');
+    }
     await refreshGames();
   } catch (err) {
     cardStatus(card, err.message, 'err');
+    toast(game.name + ': ' + err.message, 'err');
   } finally {
     if (card) card.classList.remove('busy');
   }
@@ -448,6 +453,62 @@ async function showDetails(game) {
   });
   table.appendChild(tbody);
   body.appendChild(table);
+
+  if (data.slots) {
+    const heading = document.createElement('h3');
+    heading.className = 'details-heading';
+    heading.textContent = 'Artwork available for "' + data.game.name + '"';
+    body.appendChild(heading);
+
+    const slots = document.createElement('table');
+    slots.className = 'trace';
+    slots.innerHTML = '<thead><tr><th>Slot</th><th>On SteamGridDB</th>'
+      + '<th>Top pick</th><th>Installed?</th></tr></thead>';
+    const sbody = document.createElement('tbody');
+    data.slots.forEach((slot) => {
+      const tr = document.createElement('tr');
+      if (slot.installed) tr.className = 'hit';
+      const cells = [
+        slot.label,
+        slot.error ? slot.error : (slot.available + ' image' + (slot.available === 1 ? '' : 's')),
+        slot.size || (slot.best ? 'yes' : '—'),
+        slot.installed ? 'yes' : 'no',
+      ];
+      cells.forEach((text) => {
+        const td = document.createElement('td');
+        td.textContent = text;
+        tr.appendChild(td);
+      });
+      sbody.appendChild(tr);
+    });
+    slots.appendChild(sbody);
+    body.appendChild(slots);
+
+    const missing = data.slots.filter((s) => !s.installed && s.available > 0);
+    if (missing.length) {
+      const fix = document.createElement('button');
+      fix.className = 'btn primary';
+      fix.textContent = 'Install the ' + missing.length + ' missing image'
+        + (missing.length === 1 ? '' : 's') + ' now';
+      fix.onclick = async () => {
+        fix.disabled = true;
+        fix.textContent = 'Downloading…';
+        try {
+          await post('auto-art', {
+            appid: game.appid, name: game.name, game_id: data.game.id,
+            kinds: missing.map((s) => s.kind), overwrite: true,
+          });
+          await refreshGames();
+          toast('Installed. Restart Steam to see it.', 'ok');
+          $('#details').classList.add('hidden');
+        } catch (err) {
+          toast(err.message, 'err');
+          fix.disabled = false;
+        }
+      };
+      body.appendChild(fix);
+    }
+  }
 
   const verdict = document.createElement('p');
   if (data.error) {

@@ -243,6 +243,7 @@ code { background: #0d1219; padding: 1px 5px; border-radius: 4px; font-size: 12p
 .modal-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .modal-card h2 { margin: 0; font-size: 17px; }
 .details-body { overflow-y: auto; }
+.details-heading { font-size: 14px; margin: 18px 0 0; }
 .trace { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
 .trace th {
   text-align: left; padding: 6px 10px; color: var(--muted);

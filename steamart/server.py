@@ -209,13 +209,14 @@ class Handler(BaseHTTPRequestHandler):
         if route == "match":
             name = query.get("q") or query.get("name") or ""
             exe = query.get("exe") or None
-            if not name and query.get("appid"):
-                index, entry, _ = library.find_by_appid(int(query["appid"]))
+            appid = int(query["appid"]) if query.get("appid") else None
+            if not name and appid is not None:
+                _, entry, _ = library.find_by_appid(appid)
                 name = steam.vdf.get_ci(entry, "AppName", "")
                 exe = steam.entry_exe(entry)
             if not name:
                 raise ApiError("A game name is required")
-            return library.preview_match(name, exe)
+            return library.preview_match(name, exe, appid=appid)
 
         if route == "search":
             return {"results": library.client.search_all(

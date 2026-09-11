@@ -426,7 +426,7 @@ class Library:
                 result["errors"][kind] = "could not write artwork: %s" % exc
         return result
 
-    def preview_match(self, name, exe=None):
+    def preview_match(self, name, exe=None, appid=None):
         """Dry run of the title matching: what it searches and what it finds.
 
         Installs nothing. This is what the UI shows when you ask why a game
@@ -454,13 +454,37 @@ class Library:
             return result
 
         result["trace"] = trace
-        if game:
-            result["game"] = {
-                "id": game["id"],
-                "name": game.get("name", ""),
-                "matched_by": game.get("_matched_by"),
-                "confidence": game.get("_confidence", 1.0),
-            }
+        if not game:
+            return result
+
+        result["game"] = {
+            "id": game["id"],
+            "name": game.get("name", ""),
+            "matched_by": game.get("_matched_by"),
+            "confidence": game.get("_confidence", 1.0),
+        }
+
+        # Then the half that people actually care about: for the game we
+        # matched, is there artwork for each slot, and is it installed?
+        result["slots"] = []
+        for kind, spec in steam.ART_KINDS.items():
+            row = {"kind": kind, "label": spec["label"], "available": 0,
+                   "installed": False, "best": None, "error": None}
+            if appid is not None:
+                row["installed"] = bool(
+                    steam.existing_art(self.user["path"], appid, kind))
+            try:
+                candidates = self.candidates(game["id"], kind)
+                row["available"] = len(candidates)
+                if candidates:
+                    best = candidates[0]
+                    row["best"] = best.get("url")
+                    row["thumb"] = best.get("thumb")
+                    if best.get("width") and best.get("height"):
+                        row["size"] = "%dx%d" % (best["width"], best["height"])
+            except sgdb.SGDBError as exc:
+                row["error"] = str(exc)
+            result["slots"].append(row)
         return result
 
     def apply_asset(self, appid, kind, url):
