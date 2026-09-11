@@ -20,6 +20,26 @@ API_BASE = "https://www.steamgriddb.com/api/v2"
 # How close a title has to be before we call it a match. Below this it reports
 # a miss and shows its working, rather than installing art for the wrong game.
 MIN_CONFIDENCE = 0.55
+
+# Filling a large library means hundreds of requests, so 429s are expected
+# rather than exceptional.
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_MAX_WAIT = 20.0
+
+
+def _retry_delay(exc, attempt):
+    """Honour Retry-After when the server sends one, else back off."""
+    header = None
+    try:
+        header = exc.headers.get("Retry-After")
+    except Exception:
+        pass
+    if header:
+        try:
+            return min(float(header), RATE_LIMIT_MAX_WAIT)
+        except (TypeError, ValueError):
+            pass
+    return min(1.5 * (2 ** attempt), RATE_LIMIT_MAX_WAIT)
 USER_AGENT = "SteamArt/1.0 (+https://github.com/)"
 
 # Ideal pixel size per slot. Assets that match exactly are ranked first, since
@@ -48,6 +68,11 @@ class Client:
         self._cache = {}
         self._cache_ttl = cache_ttl
 
+    @staticmethod
+    def _sleep(seconds):
+        """Overridable so tests do not actually wait."""
+        time.sleep(seconds)
+
     # -- plumbing ---------------------------------------------------------
 
     def _request(self, path, params=None, use_cache=True):
@@ -71,24 +96,41 @@ class Client:
             "User-Agent": USER_AGENT,
             "Accept": "application/json",
         })
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            if exc.code in (401, 403):
-                raise SGDBAuthError("SteamGridDB rejected the API key (HTTP %d)" % exc.code)
-            if exc.code == 404:
-                # Must be an empty list, not a dict: callers test the result
-                # for emptiness to decide whether to retry with fewer filters,
-                # and a dict is truthy.
-                return []
-            if exc.code == 429:
-                raise SGDBError("SteamGridDB rate limit hit; wait a moment and retry")
-            raise SGDBError("SteamGridDB returned HTTP %d for %s" % (exc.code, path))
-        except urllib.error.URLError as exc:
-            raise SGDBError("Could not reach SteamGridDB: %s" % exc.reason)
-        except json.JSONDecodeError:
-            raise SGDBError("SteamGridDB returned a response that was not JSON")
+
+        payload = None
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403):
+                    raise SGDBAuthError(
+                        "SteamGridDB rejected the API key (HTTP %d)" % exc.code)
+                if exc.code == 404:
+                    # Must be an empty list, not a dict: callers test the
+                    # result for emptiness to decide whether to retry with
+                    # fewer filters, and a dict is truthy.
+                    return []
+                if exc.code == 429 and attempt < RATE_LIMIT_RETRIES:
+                    # Filling a whole library is hundreds of requests. Backing
+                    # off and retrying is the difference between most games
+                    # working and most games silently failing.
+                    self._sleep(_retry_delay(exc, attempt))
+                    continue
+                if exc.code == 429:
+                    raise SGDBError(
+                        "SteamGridDB rate limit reached even after %d retries; "
+                        "wait a minute and run it again" % RATE_LIMIT_RETRIES)
+                raise SGDBError(
+                    "SteamGridDB returned HTTP %d for %s" % (exc.code, path))
+            except urllib.error.URLError as exc:
+                raise SGDBError("Could not reach SteamGridDB: %s" % exc.reason)
+            except json.JSONDecodeError:
+                raise SGDBError("SteamGridDB returned a response that was not JSON")
+
+        if payload is None:
+            raise SGDBError("SteamGridDB did not respond to %s" % path)
 
         if not payload.get("success", False):
             errors = payload.get("errors") or ["unknown error"]
@@ -221,19 +263,22 @@ class Client:
             "humor": "false" if not humor else "any",
         }
 
-        attempts = []
-        if spec["dimensions"]:
-            attempts.append(dict(base, types="static", dimensions=spec["dimensions"]))
-        attempts.append(dict(base, types="static"))
-        if not animated:
+        # Note there is no dimensions filter in the request. The capsule and
+        # wide slots both come from /grids, so asking unfiltered means the two
+        # share one identical URL and the second is a cache hit. Sizes are
+        # narrowed locally below instead. That takes a game from as many as 15
+        # requests down to 4, which is what keeps a big library under the rate
+        # limit.
+        attempts = [dict(base, types="static")]
+        if animated:
+            attempts.insert(0, dict(base, types="static,animated"))
+        else:
             # Last resort: an animated cover beats no cover. rank_assets keeps
             # these below anything static.
             attempts.append(dict(base))
-        else:
-            attempts.insert(0, dict(base, types="static,animated"))
 
         path = "/%s/game/%s" % (spec["endpoint"], game_id)
-        last_error = None
+        data, last_error = [], None
         for params in attempts:
             try:
                 data = self._request(path, params)
@@ -242,13 +287,22 @@ class Client:
             except SGDBError as exc:
                 last_error = exc
                 continue
-            ranked = rank_assets(data, kind)
-            if ranked:
-                return ranked
+            if data:
+                break
 
-        if last_error is not None:
-            raise last_error
-        return []
+        if not data:
+            if last_error is not None:
+                raise last_error
+            return []
+
+        allowed = _allowed_sizes(spec)
+        if allowed:
+            fitting = [a for a in data if isinstance(a, dict)
+                       and (a.get("width"), a.get("height")) in allowed]
+            # Only narrow when something fits; an odd size beats an empty slot.
+            if fitting:
+                data = fitting
+        return rank_assets(data, kind)
 
     def best_asset(self, game_id, kind, **kwargs):
         candidates = self.assets(game_id, kind, **kwargs)
@@ -312,6 +366,20 @@ def _extension_for(url, content_type):
         return by_mime[content_type]
     extension = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
     return extension if extension in (".png", ".jpg", ".jpeg", ".webp", ".ico") else ".png"
+
+
+def _allowed_sizes(spec):
+    """The slot's acceptable pixel sizes, parsed from its dimensions string."""
+    if not spec.get("dimensions"):
+        return None
+    sizes = set()
+    for part in spec["dimensions"].split(","):
+        width, _, height = part.strip().partition("x")
+        try:
+            sizes.add((int(width), int(height)))
+        except ValueError:
+            continue
+    return sizes or None
 
 
 def _match_targets(name, exe=None):

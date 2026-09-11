@@ -167,6 +167,33 @@ Two guards stop a near-miss becoming a wrong answer:
   "handsoffate" but is three times longer, so it scores 52% and is rejected
   rather than being handed a substring bonus.
 
+## When some games come out blank
+
+The library toolbar gives you three ways to work through the stragglers:
+
+- **Get missing artwork** — fills every empty slot across the whole library and
+  leaves anything already installed alone.
+- **Retry N incomplete** — only the games that are not finished yet. Cheap to
+  press repeatedly.
+- **Show only games missing artwork** — hides the finished ones so you can see
+  what is left. The counter reads `12 games · 3 incomplete · 7 slots empty`.
+
+After a bulk run, anything that did not come out complete is listed underneath
+with the reason, and **?** / **Pick** / **Rename** buttons beside it. The three
+things that actually go wrong:
+
+| Reason shown | What to do |
+|---|---|
+| `No SteamGridDB match for …` | The title is not recognisable from the filename. **Rename** it to the real title and retry. |
+| `matched X, but SteamGridDB has no logo` | Genuinely nothing uploaded for that slot. Nothing to be done; the game still works. |
+| `rate limit reached` | Too many requests too quickly. Wait a minute and press **Retry incomplete**. |
+
+On rate limits: filling a library is hundreds of requests. SteamArt retries a
+429 three times with backoff, honouring `Retry-After`, and asks for all grid
+sizes in one request so the capsule and wide slots share it — four requests per
+game rather than fifteen. A very large library can still hit the ceiling, which
+is what **Retry incomplete** is for.
+
 ## Seeing what it searched for
 
 Press **?** on any game card. It shows two tables:

@@ -12,7 +12,7 @@
   <div class="brand">
     <span class="brand-mark"></span>
     <div>
-      <h1>SteamArt</h1>
+      <h1>SteamArt <span id="version" class="version"></span></h1>
       <p id="steamPath" class="brand-sub">looking for Steam&hellip;</p>
     </div>
   </div>
@@ -39,7 +39,12 @@
   <!-- ------------------------------------------------------ library -->
   <section id="view-library" class="view active">
     <div class="toolbar">
-      <button id="autoAllBtn" class="btn primary">Get artwork for everything missing</button>
+      <button id="autoAllBtn" class="btn primary">Get missing artwork</button>
+      <button id="autoIncompleteBtn" class="btn ghost" title="Only the games that are not finished yet">Retry incomplete only</button>
+      <label class="check">
+        <input type="checkbox" id="onlyMissing">
+        <span>Show only games missing artwork</span>
+      </label>
       <label class="check">
         <input type="checkbox" id="overwriteAll">
         <span>Replace artwork I already have</span>
@@ -50,6 +55,11 @@
     <div id="progress" class="progress hidden">
       <div class="progress-bar"><div id="progressFill"></div></div>
       <p id="progressText"></p>
+    </div>
+    <div id="report" class="panel report hidden">
+      <h2 id="reportTitle"></h2>
+      <p id="reportIntro" class="muted"></p>
+      <div id="reportBody"></div>
     </div>
     <div id="gameGrid" class="game-grid"></div>
     <div id="libraryEmpty" class="empty hidden">

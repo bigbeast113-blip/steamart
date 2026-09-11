@@ -68,6 +68,7 @@ function render() {
 
 function renderHeader() {
   const data = state.data;
+  $('#version').textContent = data.version ? 'v' + data.version : '';
   $('#steamPath').textContent = data.steam_root || 'Steam not found';
 
   const select = $('#userSelect');
@@ -130,23 +131,38 @@ function artUrl(appid, kind) {
   return '/api/art/' + appid + '/' + kind + '?v=' + state.cacheBust;
 }
 
+const isIncomplete = (game) => state.artKinds.some((k) => !game.art[k.key]);
+
 function renderLibrary() {
   const grid = $('#gameGrid');
   const term = $('#filter').value.trim().toLowerCase();
-  const games = term
-    ? state.games.filter((g) => g.name.toLowerCase().includes(term))
-    : state.games;
+  let games = state.games;
+  if (term) games = games.filter((g) => g.name.toLowerCase().includes(term));
+  if ($('#onlyMissing').checked) games = games.filter(isIncomplete);
 
   grid.innerHTML = '';
   $('#libraryEmpty').classList.toggle('hidden', state.games.length > 0);
 
-  const missing = state.games.reduce(
+  const slotsEmpty = state.games.reduce(
     (total, game) => total + state.artKinds.filter((k) => !game.art[k.key]).length, 0);
+  const incomplete = state.games.filter(isIncomplete).length;
   $('#libraryCount').textContent = state.games.length
-    ? state.games.length + ' games, ' + missing + ' artwork slots empty'
+    ? state.games.length + ' games · ' + incomplete + ' incomplete · '
+      + slotsEmpty + ' slots empty'
     : '';
   $('#autoAllBtn').disabled = !state.games.length;
+  $('#autoIncompleteBtn').disabled = !incomplete;
+  $('#autoIncompleteBtn').textContent = incomplete
+    ? 'Retry ' + incomplete + ' incomplete' : 'Nothing incomplete';
 
+  if (!games.length && state.games.length) {
+    const none = document.createElement('p');
+    none.className = 'muted';
+    none.textContent = $('#onlyMissing').checked
+      ? 'Every game has all five images. Nothing missing.'
+      : 'No games match that filter.';
+    grid.appendChild(none);
+  }
   games.forEach((game) => grid.appendChild(gameCard(game)));
 }
 
@@ -277,16 +293,56 @@ async function autoArt(game, card) {
   }
 }
 
-async function autoAll() {
+function renderReport(entries, total) {
+  const panel = $('#report');
+  const body = $('#reportBody');
+  body.innerHTML = '';
+  if (!entries.length) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  $('#reportTitle').textContent = entries.length + ' of ' + total
+    + ' still need attention';
+  $('#reportIntro').textContent = 'These are the games that did not come out '
+    + 'complete. Press ? on a row to see every search that was tried and what '
+    + 'artwork exists, or Pick to choose it yourself.';
+
+  entries.forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'report-row';
+
+    const name = document.createElement('div');
+    name.className = 'report-name';
+    name.textContent = entry.game.name;
+    row.appendChild(name);
+
+    const why = document.createElement('div');
+    why.className = 'report-why' + (entry.kind === 'err' ? ' err' : '');
+    why.textContent = entry.text;
+    row.appendChild(why);
+
+    const actions = document.createElement('div');
+    actions.className = 'report-actions';
+    actions.appendChild(button('?', 'ghost tiny', () => showDetails(entry.game)));
+    actions.appendChild(button('Pick', 'ghost tiny', () => openPicker(entry.game)));
+    actions.appendChild(button('Rename', 'ghost tiny', () => renameGame(entry.game)));
+    row.appendChild(actions);
+
+    body.appendChild(row);
+  });
+}
+
+async function autoAll(incompleteOnly) {
   if (state.busy) return;
   if (!state.data.config.api_key_set) {
     toast('Add a SteamGridDB API key in Settings first.', 'err');
     showView('settings');
     return;
   }
-  const overwrite = $('#overwriteAll').checked;
+  const overwrite = $('#overwriteAll').checked && !incompleteOnly;
   const todo = state.games.filter((game) =>
-    overwrite || state.artKinds.some((kind) => !game.art[kind.key]));
+    overwrite || isIncomplete(game));
   if (!todo.length) {
     toast('Every game already has all five artwork slots filled.', 'ok');
     return;
@@ -298,7 +354,7 @@ async function autoAll() {
 
   let done = 0;
   let filled = 0;
-  const failures = [];
+  const problems = [];
   for (const game of todo) {
     $('#progressText').textContent =
       'Fetching artwork for ' + game.name + ' (' + (done + 1) + ' of ' + todo.length + ')';
@@ -313,21 +369,34 @@ async function autoAll() {
       filled += applied;
       const summary = summarize(result);
       cardStatus(card, summary.text, summary.kind);
-      if (summary.kind === 'err') failures.push(game.name);
+      const short = Object.keys(result.skipped || {}).filter(
+        (k) => !(result.skipped[k] || '').includes('already'));
+      if (summary.kind === 'err') {
+        problems.push({ game: game, text: summary.text, kind: 'err' });
+      } else if (short.length) {
+        problems.push({
+          game: game,
+          text: 'matched ' + ((result.game && result.game.name) || 'a game')
+            + ', but SteamGridDB has no ' + short.join(', '),
+          kind: 'warn',
+        });
+      }
     } catch (err) {
       cardStatus(card, err.message, 'err');
-      failures.push(game.name);
+      problems.push({ game: game, text: err.message, kind: 'err' });
     }
     if (card) card.classList.remove('busy');
     done += 1;
   }
 
   $('#progressFill').style.width = '100%';
-  $('#progressText').textContent = 'Done — ' + filled + ' images added'
-    + (failures.length ? ', ' + failures.length + ' games had no match' : '');
+  $('#progressText').textContent = 'Done — ' + filled + ' images added across '
+    + todo.length + ' games'
+    + (problems.length ? ', ' + problems.length + ' need attention' : '');
   state.busy = false;
   $('#autoAllBtn').disabled = false;
   await refreshGames();
+  renderReport(problems, todo.length);
   toast(filled
     ? filled + ' images added. Restart Steam to see them.'
     : 'No new artwork found.', filled ? 'ok' : '');
@@ -987,7 +1056,9 @@ $$('.tab').forEach((tab) => { tab.onclick = () => showView(tab.dataset.view); })
 window.addEventListener('hashchange', () => showView(location.hash.slice(1)));
 $('#refreshBtn').onclick = () => { state.cacheBust = Date.now(); load(); };
 $('#filter').oninput = renderLibrary;
-$('#autoAllBtn').onclick = autoAll;
+$('#onlyMissing').onchange = renderLibrary;
+$('#autoAllBtn').onclick = () => autoAll(false);
+$('#autoIncompleteBtn').onclick = () => autoAll(true);
 $('#userSelect').onchange = async (event) => {
   await post('settings', { user_id32: event.target.value });
   state.browsePath = '';

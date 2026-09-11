@@ -40,6 +40,10 @@ a { color: var(--accent); }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand h1 { font-size: 19px; margin: 0; letter-spacing: .5px; }
 .brand-sub { margin: 0; font-size: 12px; color: var(--muted); }
+.version {
+  font-size: 11px; font-weight: 400; color: var(--muted);
+  vertical-align: middle; margin-left: 2px;
+}
 .brand-mark {
   width: 30px; height: 30px; border-radius: 8px;
   background: linear-gradient(135deg, var(--accent), #1b5c86);
@@ -158,6 +162,24 @@ main { padding: 18px 20px 60px; }
 .card-status { font-size: 11px; min-height: 14px; }
 .card-status.ok { color: var(--good); }
 .card-status.err { color: var(--bad); }
+
+/* ------------------------------------------------- incomplete report */
+.report { max-width: none; margin-bottom: 18px; }
+.report h2 { font-size: 15px; }
+.report-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 2fr auto;
+  gap: 12px; align-items: center;
+  padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.report-row:last-child { border-bottom: 0; }
+.report-name { font-size: 14px; font-weight: 600; }
+.report-why { font-size: 12px; color: var(--warn); }
+.report-why.err { color: var(--bad); }
+.report-actions { display: flex; gap: 6px; }
+@media (max-width: 720px) {
+  .report-row { grid-template-columns: 1fr; gap: 4px; }
+}
 
 .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
 .empty h2 { color: var(--text); font-weight: 500; }

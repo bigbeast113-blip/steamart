@@ -79,12 +79,20 @@ class FakeSteamGridDB:
         self.calls = []
         self.downloads = []
         self.dimension_404 = False
+        # Number of leading asset requests to answer with HTTP 429.
+        self.rate_limit_first = 0
+        self._limited = 0
 
     def __call__(self, request, timeout=None):
         url = getattr(request, "full_url", request)
         self.calls.append(url)
         parsed = urllib.parse.urlparse(url)
         params = urllib.parse.parse_qs(parsed.query)
+
+        if (self.rate_limit_first and "/game/" in parsed.path
+                and self._limited < self.rate_limit_first):
+            self._limited += 1
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, None)
 
         if parsed.netloc == "cdn":
             self.downloads.append(url)
@@ -242,6 +250,56 @@ class ArtworkPipelineTests(unittest.TestCase):
         result = self.library.auto_art(appid, name="Handsoffate", exe=self.exe,
                                        overwrite=True)
         self.assertEqual(sorted(result["applied"]), sorted(steam.ART_KINDS))
+
+    def test_a_game_costs_only_a_handful_of_requests(self):
+        """Request count is what decides whether a big library survives the
+        rate limit. Capsule and wide must share one /grids call."""
+        appid = self._add()
+        self.library.auto_art(appid, name="Handsoffate", exe=self.exe)
+        api_calls = [c for c in self.http.calls if "/api/v2/" in c]
+        asset_calls = [c for c in api_calls if "/game/" in c]
+        self.assertLessEqual(len(asset_calls), 4,
+                             "one call per endpoint at most: %s" % asset_calls)
+        self.assertEqual(len([c for c in asset_calls if "/grids/" in c]), 1,
+                         "capsule and wide should reuse a single grids request")
+
+    def test_no_dimension_filter_is_sent(self):
+        # Sizes are narrowed locally so the two grid slots can share a request.
+        appid = self._add()
+        self.library.auto_art(appid, name="Handsoffate", exe=self.exe)
+        self.assertFalse([c for c in self.http.calls if "dimensions=" in c])
+
+    def test_a_rate_limit_is_retried_rather_than_failing_the_slot(self):
+        self.http.rate_limit_first = 2
+        waits = []
+        original = sgdb.Client._sleep
+        sgdb.Client._sleep = staticmethod(lambda s: waits.append(s))
+        try:
+            appid = self._add()
+            result = self.library.auto_art(appid, name="Handsoffate", exe=self.exe)
+        finally:
+            sgdb.Client._sleep = original
+        self.assertEqual(result["errors"], {})
+        self.assertEqual(sorted(result["applied"]), sorted(steam.ART_KINDS))
+        self.assertEqual(len(waits), 2, "should have backed off twice")
+        self.assertTrue(all(w <= sgdb.RATE_LIMIT_MAX_WAIT for w in waits))
+
+    def test_a_persistent_rate_limit_is_reported_clearly(self):
+        self.http.rate_limit_first = 99
+        original = sgdb.Client._sleep
+        sgdb.Client._sleep = staticmethod(lambda s: None)
+        try:
+            appid = self._add()
+            result = self.library.auto_art(appid, name="Handsoffate", exe=self.exe)
+        finally:
+            sgdb.Client._sleep = original
+        self.assertIn("rate limit", str(result["errors"]).lower())
+
+    def test_retry_after_header_is_honoured(self):
+        exc = urllib.error.HTTPError("u", 429, "Too Many", {"Retry-After": "4"}, None)
+        self.assertEqual(sgdb._retry_delay(exc, 0), 4.0)
+        capped = urllib.error.HTTPError("u", 429, "Too Many", {"Retry-After": "900"}, None)
+        self.assertEqual(sgdb._retry_delay(capped, 0), sgdb.RATE_LIMIT_MAX_WAIT)
 
     def test_import_with_art_fills_everything_in_one_go(self):
         result = self.library.add_games(
