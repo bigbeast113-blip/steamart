@@ -242,6 +242,10 @@ code { background: #0d1219; padding: 1px 5px; border-radius: 4px; font-size: 12p
 }
 .modal-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .modal-card h2 { margin: 0; font-size: 17px; }
+.stopped-card { text-align: center; padding: 34px 28px; width: min(440px, 100%); }
+.stopped-card h2 { margin: 0 0 8px; }
+.stopped-card p { margin: 0; }
+
 .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .chip {
   background: var(--panel); border: 1px solid var(--line); color: var(--muted);

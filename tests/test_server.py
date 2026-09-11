@@ -6,6 +6,7 @@ Run with:  python3 tests/test_server.py
 import json
 import os
 import shutil
+import socket
 import sys
 import tempfile
 import threading
@@ -154,10 +155,63 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(exc.code, 404)
             self.assertIn("Unknown endpoint", json.loads(exc.read().decode())["error"])
 
+    def test_state_reports_launcher_availability(self):
+        status, data = self.json_get("/api/state")
+        self.assertEqual(status, 200)
+        self.assertIn("launcher", data)
+        self.assertIn("supported", data["launcher"])
+        self.assertIsInstance(data["launcher"]["installed"], bool)
+
     def test_art_lookup_without_a_key_reports_cleanly(self):
         status, data = self.json_post("/api/check-key", {"api_key": ""})
         self.assertEqual(status, 400)
         self.assertIn("API key", data["error"])
+
+
+class QuitTests(unittest.TestCase):
+    """Quit gets its own server, since a passing test kills it."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="steamart-quit-")
+        root = os.path.join(self.tmp, "Steam")
+        os.makedirs(os.path.join(root, "userdata", "5", "config"))
+        os.makedirs(os.path.join(root, "config"))
+        config = core.Config(os.path.join(self.tmp, "config.json"))
+        config.update({"steam_root": root, "api_key": ""})
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        self.httpd.library = core.Library(config)
+        self.httpd.verbose = False
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_quit_answers_then_stops_the_server(self):
+        url = "http://127.0.0.1:%d/api/quit" % self.port
+        request = urllib.request.Request(url, data=b"{}", method="POST",
+                                         headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            self.assertEqual(response.status, 200)
+            self.assertTrue(json.loads(response.read().decode())["ok"])
+
+        # The reply comes first and the shutdown lands shortly after, so the
+        # browser never sees a dropped connection.
+        self.thread.join(timeout=10)
+        self.assertFalse(self.thread.is_alive(), "server should have stopped")
+
+    def test_already_running_detects_a_live_instance(self):
+        self.assertTrue(server._already_running("127.0.0.1", self.port))
+
+    def test_already_running_is_false_for_a_dead_port(self):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            dead_port = probe.getsockname()[1]
+        self.assertFalse(server._already_running("127.0.0.1", dead_port, timeout=0.5))
 
 
 if __name__ == "__main__":

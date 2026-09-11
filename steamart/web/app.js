@@ -61,6 +61,7 @@ function render() {
   renderBanners();
   renderLibrary();
   renderSettings();
+  renderLauncher();
 }
 
 // ---------------------------------------------------------------- header
@@ -109,6 +110,11 @@ function renderBanners() {
   if (!data.config.api_key_set) {
     add('info', 'Add a free SteamGridDB API key to start pulling artwork.',
       'Add key', () => showView('settings'));
+  }
+  const launcher = data.launcher || {};
+  if (launcher.supported && !launcher.installed) {
+    add('info', 'Tired of the terminal? Put SteamArt on your desktop and start '
+      + 'it with a double-click.', 'Add shortcut', () => installLauncher(false));
   }
   if (data.steam_running) {
     add('warn', 'Steam is running. It rewrites its config when it closes, which can '
@@ -741,6 +747,52 @@ function renderSettings() {
   });
 }
 
+function renderLauncher() {
+  const info = (state.data && state.data.launcher) || {};
+  const panel = $('#launcherPanel');
+  panel.classList.toggle('hidden', !info.supported);
+  if (!info.supported) return;
+
+  $('#installLauncherBtn').textContent = info.installed
+    ? 'Reinstall shortcut' : 'Add desktop shortcut';
+  $('#removeLauncherBtn').classList.toggle('hidden', !info.installed);
+  $('#launcherText').textContent = info.installed
+    ? 'Installed. Look for SteamArt on your desktop and in the application menu '
+      + '— double-click it to start, no terminal needed.'
+    : 'Add SteamArt to your application menu and desktop so you can start it '
+      + 'with a double-click instead of the terminal.';
+}
+
+async function installLauncher(remove) {
+  const status = $('#launcherStatus');
+  status.textContent = remove ? 'Removing…' : 'Installing…';
+  status.className = 'status';
+  try {
+    const result = await post('install-launcher', { remove: !!remove });
+    status.textContent = remove
+      ? 'Removed.'
+      : 'Added: ' + (result.written || []).join('  ');
+    status.className = 'status ok';
+    await load();
+    if (!remove) {
+      toast('Shortcut added. Double-click SteamArt on your desktop next time.', 'ok');
+    }
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'status err';
+  }
+}
+
+async function quitApp() {
+  if (!window.confirm('Stop SteamArt? Any artwork already downloaded is saved.')) return;
+  try {
+    await post('quit', {});
+  } catch (err) {
+    /* The server may drop the connection as it goes down; that is fine. */
+  }
+  $('#stopped').classList.remove('hidden');
+}
+
 async function saveKey() {
   const key = $('#apiKeyInput').value.trim();
   const status = $('#keyStatus');
@@ -802,6 +854,9 @@ $('#userSelect').onchange = async (event) => {
   state.browsePath = '';
   await load();
 };
+$('#quitBtn').onclick = quitApp;
+$('#installLauncherBtn').onclick = () => installLauncher(false);
+$('#removeLauncherBtn').onclick = () => installLauncher(true);
 $('#saveKeyBtn').onclick = saveKey;
 $('#saveSettingsBtn').onclick = saveSettings;
 $('#apiKeyInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveKey(); });

@@ -6,7 +6,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, core, names, server, sgdb, steam
+from . import __version__, core, launcher, names, server, sgdb, steam
 
 TICK = "+"
 CROSS = "-"
@@ -28,6 +28,12 @@ def build_parser():
     ui.add_argument("--host", default="127.0.0.1")
     ui.add_argument("--no-browser", action="store_true", help="Do not open a browser")
     ui.add_argument("--verbose", action="store_true")
+
+    install = subparsers.add_parser(
+        "install", help="Add a desktop and application-menu shortcut (Linux)")
+    install.add_argument("--remove", action="store_true", help="Take it away again")
+    install.add_argument("--no-desktop", action="store_true",
+                         help="Application menu only, nothing on the desktop")
 
     subparsers.add_parser("info", help="Show the detected Steam install and profiles")
     subparsers.add_parser("list", help="List non-Steam games and their artwork status")
@@ -72,6 +78,8 @@ def main(argv=None):
 
     if command == "key":
         return cmd_key(config, args)
+    if command == "install":
+        return cmd_install(args)
 
     try:
         library = core.Library(config)
@@ -127,6 +135,35 @@ def cmd_key(config, args):
         return 2
     config.update({"api_key": key})
     print("API key saved to %s" % config.path)
+    return 0
+
+
+def cmd_install(args):
+    if not launcher.supported():
+        print("Desktop shortcuts are a Linux feature.", file=sys.stderr)
+        if sys.platform == "win32":
+            print("On Windows: right-click run.bat -> Show more options -> "
+                  "Send to -> Desktop (create shortcut).", file=sys.stderr)
+        return 2
+
+    if args.remove:
+        removed = launcher.remove()
+        if not removed:
+            print("No shortcut was installed.")
+            return 0
+        for path in removed:
+            print("%s removed %s" % (TICK, path))
+        return 0
+
+    try:
+        written = launcher.install(on_desktop=not args.no_desktop)
+    except (OSError, RuntimeError) as exc:
+        print("Error: %s" % exc, file=sys.stderr)
+        return 2
+    for path in written:
+        print("%s created %s" % (TICK, path))
+    print("\nDouble-click SteamArt on your desktop or in the application menu.")
+    print("No terminal needed from here on.")
     return 0
 
 

@@ -12,11 +12,12 @@ import os
 import socket
 import threading
 import traceback
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import core, sgdb, steam
+from . import core, launcher, sgdb, steam
 from .steam import ART_KINDS
 
 WEB_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -237,6 +238,19 @@ class Handler(BaseHTTPRequestHandler):
             tool = library.set_compat(_appid(body), body.get("tool"))
             return {"tool": tool}
 
+        if route == "install-launcher" and method == "POST":
+            body = self._body()
+            if body.get("remove"):
+                return {"removed": launcher.remove(), "installed": False}
+            written = launcher.install()
+            return {"written": written, "installed": True}
+
+        if route == "quit" and method == "POST":
+            # Answer first, shut down a beat later, so the browser sees the
+            # reply instead of a connection error.
+            threading.Timer(0.4, self.server.shutdown).start()
+            return {"ok": True}
+
         if route.startswith("art/"):
             return self._art(route)
 
@@ -276,6 +290,11 @@ class Handler(BaseHTTPRequestHandler):
                 for key, spec in ART_KINDS.items()
             ],
             "platform": os.name,
+            "launcher": {
+                "supported": launcher.supported(),
+                "installed": launcher.installed(),
+                "paths": launcher.installed_paths(),
+            },
         }
         try:
             state["games"] = library.games()
@@ -297,6 +316,21 @@ def _version():
     return __version__
 
 
+def _already_running(host, port, timeout=1.5):
+    """True when a SteamArt instance is already answering on this port.
+
+    Clicking the desktop launcher twice should reopen the tab, not start a
+    second copy writing to the same files.
+    """
+    url = "http://%s:%d/api/state" % (host, port)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return "art_kinds" in payload
+    except Exception:
+        return False
+
+
 def _free_port(preferred, host="127.0.0.1"):
     for port in [preferred] + list(range(preferred + 1, preferred + 20)):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
@@ -309,7 +343,15 @@ def _free_port(preferred, host="127.0.0.1"):
     raise steam.SteamError("No free port near %d" % preferred)
 
 
-def serve(library=None, port=8523, host="127.0.0.1", open_browser=True, verbose=False):
+def serve(library=None, port=8523, host="127.0.0.1", open_browser=True, verbose=False,
+          reuse=True):
+    if reuse and _already_running(host, port):
+        url = "http://%s:%d/" % (host, port)
+        print("SteamArt is already running at %s - opening that instead." % url)
+        if open_browser:
+            webbrowser.open(url)
+        return
+
     library = library or core.Library()
     port = _free_port(port, host)
     httpd = ThreadingHTTPServer((host, port), Handler)

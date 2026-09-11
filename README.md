@@ -21,35 +21,70 @@ if you don't like what it chose.
 
 1. Switch to **Desktop Mode**.
 
-2. Get the code:
+2. Get the code. Cloning is worth it over the ZIP — a ZIP download loses the
+   execute permission on the scripts:
 
    ```bash
    git clone https://github.com/bigbeast113-blip/steamart.git
    cd steamart
-   ./install-deck.sh     # optional: adds a desktop + app menu launcher
-   ```
-
-3. Get a free SteamGridDB API key: sign in at
-   [steamgriddb.com](https://www.steamgriddb.com), then
-   **Preferences → API → Generate key**.
-
-4. **Close Steam.** This is the one step people skip. Steam rewrites its own
-   config files when it exits and will happily undo everything you just did.
-
-5. Start it:
-
-   ```bash
    ./run.sh
    ```
 
    Your browser opens on `http://127.0.0.1:8523/`.
 
-6. Paste the API key into **Settings**, then go to **Add games**, browse to
-   your games folder and hit **Scan this folder**. Tick what you want and press
-   **Add selected** — artwork is fetched as part of the import.
+3. Click **Add shortcut** in the blue bar at the top. That puts SteamArt on
+   your desktop and in the application menu — **from now on it's a
+   double-click, no terminal**. See [Running it with a click](#running-it-with-a-click).
 
-7. Start Steam again. Your games are under **Library → Non-Steam** with full
-   artwork.
+4. Get a free SteamGridDB API key: sign in at
+   [steamgriddb.com](https://www.steamgriddb.com), then
+   **Preferences → API → Generate key**. Paste it into **Settings** and hit
+   **Save & test**.
+
+5. **Close Steam.** This is the one step people skip. Steam rewrites its own
+   config files when it exits and will happily undo everything you just did.
+
+6. Go to **Add games**, browse to your games folder and hit **Scan this
+   folder**. Tick what you want and press **Add selected** — artwork is
+   fetched automatically as part of the import.
+
+7. Press **Quit** in SteamArt, then start Steam again. Your games are under
+   **Library → Non-Steam** with full artwork.
+
+## Running it with a click
+
+The first launch has to come from a terminal, because on Linux something has
+to grant permission to execute before anything can run. After that it never
+does again.
+
+Once SteamArt is open, hit **Add shortcut** in the banner (or **Settings →
+Desktop shortcut**). It writes a launcher to your desktop and application
+menu that:
+
+- runs without opening a terminal window;
+- calls the Python interpreter directly, so it works even from a ZIP download
+  where `run.sh` lost its execute bit;
+- reopens the existing tab if SteamArt is already running, rather than
+  starting a second copy that fights over the same files.
+
+Use the **Quit** button in the top right to stop it — with no terminal
+attached there's no Ctrl+C.
+
+Prefer the command line, or want it without launching the UI first?
+
+```bash
+python3 steamart.py install             # desktop + application menu
+python3 steamart.py install --remove    # take it back off
+```
+
+**If you downloaded the ZIP** and `./run.sh` says *Permission denied*, either
+run `python3 steamart.py` instead (works regardless), or fix it with the mouse:
+right-click `run.sh` in Dolphin → **Properties** → **Permissions** → tick
+**Is executable**.
+
+**On Windows** there's no desktop-entry standard to hook into: right-click
+`run.bat` → **Show more options** → **Send to** → **Desktop (create
+shortcut)**.
 
 ---
 
@@ -147,6 +182,7 @@ importing — that name is what gets searched.
 ./run.sh add ~/Games/Hades/Hades.exe # import (fetches art and sets Proton)
 ./run.sh list                        # every game and which slots are filled
 ./run.sh match hordesoffate.exe      # dry run: how a name would be searched
+./run.sh install                     # desktop shortcut, no more terminal
 ./run.sh art                         # fill in every empty slot, everywhere
 ./run.sh art Hades --overwrite       # redo one game from scratch
 ./run.sh remove Hades                # drop it and its artwork

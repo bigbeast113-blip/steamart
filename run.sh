@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 # Start SteamArt. On a Steam Deck: switch to Desktop Mode, then run this.
+#
+# Prefer a desktop shortcut over typing this every time:  ./install-deck.sh
 set -euo pipefail
 
 cd "$(dirname "$0")"
+
+fail() {
+  # When launched from a desktop icon there is no terminal to print to, so
+  # put the error somewhere the user will actually see it.
+  if [ -t 2 ]; then
+    echo "$1" >&2
+  else
+    kdialog --error "$1" 2>/dev/null \
+      || zenity --error --text="$1" 2>/dev/null \
+      || notify-send "SteamArt" "$1" 2>/dev/null \
+      || true
+  fi
+  exit 1
+}
 
 PYTHON=""
 for candidate in python3 python; do
@@ -15,9 +31,8 @@ for candidate in python3 python; do
 done
 
 if [ -z "$PYTHON" ]; then
-  echo "Python 3.7+ is required but was not found." >&2
-  echo "SteamOS ships with python3; if this is another distro, install it first." >&2
-  exit 1
+  fail "Python 3.7 or newer is required but was not found.
+SteamOS ships with python3; on another distro, install it first."
 fi
 
 exec "$PYTHON" steamart.py "$@"

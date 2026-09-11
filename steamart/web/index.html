@@ -22,6 +22,7 @@
       <select id="userSelect"></select>
     </label>
     <button id="refreshBtn" class="btn ghost" title="Reload from disk">Refresh</button>
+    <button id="quitBtn" class="btn ghost" title="Stop SteamArt">Quit</button>
   </div>
 </header>
 
@@ -133,6 +134,19 @@
       </div>
     </div>
 
+    <div class="panel" id="launcherPanel">
+      <h2>Desktop shortcut</h2>
+      <p class="muted" id="launcherText">
+        Add SteamArt to your application menu and desktop so you can start it
+        with a double-click instead of the terminal.
+      </p>
+      <div class="row">
+        <button id="installLauncherBtn" class="btn primary">Add desktop shortcut</button>
+        <button id="removeLauncherBtn" class="btn ghost hidden">Remove it</button>
+        <span id="launcherStatus" class="status"></span>
+      </div>
+    </div>
+
     <div class="panel">
       <h2>How this works</h2>
       <ul class="notes">
@@ -160,6 +174,13 @@
     <div id="pickerGames" class="chips"></div>
     <div id="pickerKinds" class="chips kinds"></div>
     <div id="pickerAssets" class="asset-grid"></div>
+  </div>
+</div>
+
+<div id="stopped" class="modal hidden">
+  <div class="modal-card stopped-card">
+    <h2>SteamArt has stopped</h2>
+    <p class="muted">You can close this tab. Restart Steam to see your artwork.</p>
   </div>
 </div>
 

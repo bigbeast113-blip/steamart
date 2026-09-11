@@ -12,7 +12,7 @@ from collections import OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from steamart import core, names, sgdb, steam, vdf  # noqa: E402
+from steamart import core, launcher, names, sgdb, steam, vdf  # noqa: E402
 
 
 class BinaryVdfTests(unittest.TestCase):
@@ -413,6 +413,68 @@ class MatchingTests(unittest.TestCase):
     def test_the_matching_query_is_reported(self):
         game = self.client.best_game("Hordesoffate", exe="/g/Games/hordesoffate.exe")
         self.assertEqual(names.normalize(game["_matched_by"]), "hordesoffate")
+
+
+class LauncherTests(unittest.TestCase):
+    """The desktop entry has to be right the first time: a launcher that
+    silently does nothing is worse than telling someone to use a terminal."""
+
+    def test_entry_is_a_valid_desktop_file(self):
+        text = launcher.entry_text()
+        self.assertTrue(text.startswith("[Desktop Entry]\n"))
+        keys = dict(line.split("=", 1) for line in text.splitlines()
+                    if "=" in line and not line.startswith("["))
+        self.assertEqual(keys["Type"], "Application")
+        self.assertEqual(keys["Name"], "SteamArt")
+        # Terminal=false is the whole point; true would pop up a console.
+        self.assertEqual(keys["Terminal"], "false")
+        self.assertIn("Exec", keys)
+        self.assertIn("steamart", keys["Exec"].lower())
+
+    def test_exec_line_does_not_depend_on_the_execute_bit(self):
+        # A ZIP download arrives with run.sh non-executable, so the entry must
+        # invoke the interpreter rather than the shell wrapper.
+        exec_line = launcher._exec_line()
+        self.assertNotIn("run.sh", exec_line)
+        self.assertIn("python", exec_line.lower())
+
+    def test_exec_and_path_survive_spaces(self):
+        keys = dict(line.split("=", 1) for line in launcher.entry_text().splitlines()
+                    if "=" in line and not line.startswith("["))
+        self.assertTrue(keys["Exec"].startswith('"'),
+                        "Exec must be quoted or a path with spaces breaks it")
+        self.assertEqual(keys["Exec"].count('"') % 2, 0)
+
+    def test_icon_points_at_something_real(self):
+        icon = launcher.icon_path()
+        self.assertTrue(os.path.isabs(icon) or icon == "applications-games")
+        if os.path.isabs(icon):
+            self.assertTrue(os.path.isfile(icon))
+
+    def test_install_writes_an_executable_entry(self):
+        if not launcher.supported():
+            self.skipTest("desktop entries are Linux only")
+        tmp = tempfile.mkdtemp(prefix="steamart-launcher-")
+        try:
+            os.environ["XDG_DATA_HOME"] = tmp
+            written = launcher.install(on_desktop=False)
+            self.assertTrue(written)
+            for path in written:
+                self.assertTrue(os.path.isfile(path))
+                self.assertTrue(os.stat(path).st_mode & 0o111,
+                                "KDE ignores a launcher that is not executable")
+            self.assertTrue(launcher.installed())
+            launcher.remove()
+            self.assertFalse(launcher.installed())
+        finally:
+            os.environ.pop("XDG_DATA_HOME", None)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_unsupported_platforms_say_so_instead_of_failing_oddly(self):
+        if launcher.supported():
+            self.skipTest("this platform does support desktop entries")
+        with self.assertRaises(RuntimeError):
+            launcher.install()
 
 
 class ProtonNamingTests(unittest.TestCase):
